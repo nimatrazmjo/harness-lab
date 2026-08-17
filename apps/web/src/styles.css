@@ -252,6 +252,55 @@ button:disabled {
   color: var(--ink-muted);
 }
 
+.icd10-search-widget form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.icd10-search-widget form label {
+  display: none;
+}
+
+.icd10-search-widget button {
+  white-space: nowrap;
+}
+
+.icd10-search-widget__empty {
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
+.icd10-search-widget__results {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+}
+
+.icd10-search-widget__result {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.icd10-search-widget__code {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.icd10-search-widget__description {
+  flex: 1;
+  font-size: 0.85rem;
+}
+
+.icd10-search-widget__result button {
+  margin-top: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+
 .version-history {
   list-style: none;
   padding: 0;

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import type { Encounter, NoteVersion, SoapNote, Template } from "@scribe/shared-types";
+import type { Encounter, Icd10CodeRef, NoteVersion, SoapNote, Template } from "@scribe/shared-types";
 import { encountersApi } from "../../api/encounters";
 import { streamScribeGeneration } from "../../api/scribe-stream";
 import { templatesApi } from "../../api/templates";
+import { Icd10SearchWidget } from "../icd10/Icd10SearchWidget";
 import { NoteEditor } from "../note/NoteEditor";
 import { VersionHistory } from "../note/VersionHistory";
 import { TranscriptInput } from "./TranscriptInput";
@@ -79,6 +80,14 @@ export function EncounterWorkspacePage() {
     }
   }
 
+  function onAppendIcd10(result: Icd10CodeRef) {
+    setNote((prev) => {
+      if (!prev) return prev;
+      if (prev.icd10Codes.some((c) => c.code === result.code)) return prev; // dedup
+      return { ...prev, icd10Codes: [...prev.icd10Codes, result] };
+    });
+  }
+
   async function onSave() {
     if (!encounterId || !note) return;
     setSaving(true);
@@ -152,6 +161,13 @@ export function EncounterWorkspacePage() {
           <h2>Version history</h2>
           <VersionHistory versions={history} onSelect={(v) => setNote(v.note)} />
         </section>
+
+        {note && (
+          <section className="panel">
+            <h2>ICD-10 search</h2>
+            <Icd10SearchWidget onAppend={onAppendIcd10} appendedCodes={note.icd10Codes} />
+          </section>
+        )}
       </div>
     </div>
   );
