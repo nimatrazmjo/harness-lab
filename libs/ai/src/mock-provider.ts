@@ -63,6 +63,12 @@ export class MockModelClient implements ModelClient {
       const mostRecent = priorHistory[0];
       plan = `Plan: continuing management per prior visit on ${mostRecent.encounterDate} (${mostRecent.plan}). Reassess response to treatment and adjust as needed.`;
     }
+    // Template is read fresh server-side per call (ScribeService), never client-supplied — so
+    // this literally cannot go stale, and an admin edit to promptInstructions shows up verbatim
+    // on the very next generation with no cache to bust (admin.template_select/live_update).
+    if (input.templateApplied) {
+      plan = `[${input.templateApplied.name}] ${plan} Template guidance applied: ${input.templateApplied.promptInstructions.trim()}`;
+    }
 
     for await (const chunk of streamSection("subjective", subjective)) yield chunk;
     for await (const chunk of streamSection("objective", objective)) yield chunk;

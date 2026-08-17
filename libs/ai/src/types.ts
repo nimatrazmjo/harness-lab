@@ -33,9 +33,22 @@ export interface Icd10CandidateTool {
   execute(query: string): Promise<Icd10CodeRef[]>;
 }
 
+/** The structured form of the currently-selected template, read fresh server-side on every
+ * generation call — never supplied by the client (AGENTS.md [CONTEXT-INJECTION]). Alongside
+ * `templateInstructions` (the flattened string real LLM providers use as system-prompt context),
+ * this gives a mock/deterministic provider something concrete to key off so
+ * admin.template_select / admin.template_live_update are observably true, not just structurally
+ * plausible. */
+export interface AppliedTemplate {
+  name: string;
+  encounterType: string;
+  promptInstructions: string;
+}
+
 export interface GenerateSoapNoteInput {
   transcript: string;
   templateInstructions: string;
+  templateApplied?: AppliedTemplate;
   patientHistoryTool: PatientHistoryTool;
   icd10CandidateTool: Icd10CandidateTool;
 }

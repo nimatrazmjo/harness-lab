@@ -38,11 +38,10 @@ export class ScribeService {
     // Template is loaded fresh, server-side, every call — an admin edit takes
     // effect on the very next generation with no client-side cache to bust.
     const template = encounter.template_id ? await this.templatesRepo.findById(encounter.template_id) : null;
-    const templateInstructions = buildTemplateInstructions(
-      template
-        ? { name: template.name, encounterType: template.encounter_type, promptInstructions: template.prompt_instructions }
-        : null,
-    );
+    const appliedTemplate = template
+      ? { name: template.name, encounterType: template.encounter_type, promptInstructions: template.prompt_instructions }
+      : null;
+    const templateInstructions = buildTemplateInstructions(appliedTemplate);
 
     const patientId = encounter.patient_id;
     const patientHistoryTool = {
@@ -77,6 +76,7 @@ export class ScribeService {
     for await (const chunk of this.model.generateSoapNote({
       transcript,
       templateInstructions,
+      templateApplied: appliedTemplate ?? undefined,
       patientHistoryTool,
       icd10CandidateTool,
     })) {

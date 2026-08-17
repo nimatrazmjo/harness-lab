@@ -95,4 +95,57 @@ describe("MockModelClient", () => {
       expect(done.note.plan).toContain("NSAIDs and PT");
     }
   });
+
+  it("plan is unaffected when no template is applied", async () => {
+    const client = new MockModelClient();
+    const chunks = await collect(client.generateSoapNote(makeInput()));
+    const done = chunks.find((c) => c.type === "done");
+    if (done?.type === "done") {
+      expect(done.note.plan).not.toContain("Template guidance applied");
+    }
+  });
+
+  it("plan visibly incorporates the applied template's current instructions", async () => {
+    const client = new MockModelClient();
+    const chunks = await collect(
+      client.generateSoapNote(
+        makeInput({
+          templateApplied: {
+            name: "Ortho Follow-up",
+            encounterType: "orthopedic_follow_up",
+            promptInstructions: "Emphasize range-of-motion and pain trend.",
+          },
+        }),
+      ),
+    );
+    const done = chunks.find((c) => c.type === "done");
+    expect(done?.type).toBe("done");
+    if (done?.type === "done") {
+      expect(done.note.plan).toContain("Ortho Follow-up");
+      expect(done.note.plan).toContain("Emphasize range-of-motion and pain trend.");
+    }
+  });
+
+  it("two different templates produce two different plans for the identical transcript", async () => {
+    const client = new MockModelClient();
+    const orthoChunks = await collect(
+      client.generateSoapNote(
+        makeInput({
+          templateApplied: { name: "Ortho Follow-up", encounterType: "ortho", promptInstructions: "Focus on ROM." },
+        }),
+      ),
+    );
+    const urgentChunks = await collect(
+      client.generateSoapNote(
+        makeInput({
+          templateApplied: { name: "Urgent Care", encounterType: "urgent_care", promptInstructions: "Be concise." },
+        }),
+      ),
+    );
+    const orthoDone = orthoChunks.find((c) => c.type === "done");
+    const urgentDone = urgentChunks.find((c) => c.type === "done");
+    if (orthoDone?.type === "done" && urgentDone?.type === "done") {
+      expect(orthoDone.note.plan).not.toBe(urgentDone.note.plan);
+    }
+  });
 });
