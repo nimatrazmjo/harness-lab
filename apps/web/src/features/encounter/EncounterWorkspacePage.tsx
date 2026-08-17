@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import type { Encounter, Icd10CodeRef, NoteVersion, SoapNote, Template } from "@scribe/shared-types";
+import type { Encounter, Icd10CodeRef, NoteVersion, RedFlag, SoapNote, Template } from "@scribe/shared-types";
 import { encountersApi } from "../../api/encounters";
 import { streamScribeGeneration } from "../../api/scribe-stream";
 import { templatesApi } from "../../api/templates";
@@ -28,6 +28,7 @@ export function EncounterWorkspacePage() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [compareFromId, setCompareFromId] = useState("");
   const [compareToId, setCompareToId] = useState("");
+  const [redFlags, setRedFlags] = useState<RedFlag[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -38,6 +39,8 @@ export function EncounterWorkspacePage() {
       setTranscript(e.transcript ?? "");
       setTemplateId(e.templateId ?? undefined);
     });
+    // Advisory only, computed independently of generation (pioneer.red_flags).
+    encountersApi.getRedFlags(encounterId).then(setRedFlags);
     templatesApi.listActive().then(setTemplates);
     encountersApi.history(encounterId).then(setHistory);
     // Restore any in-progress (not yet saved) note — survives refresh, close/reopen, and a
@@ -66,8 +69,11 @@ export function EncounterWorkspacePage() {
     if (!encounterId) return;
     // Debounced autosave of the raw input — persisted server-side as the provider types.
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      encountersApi.updateInput(encounterId, value, templateId);
+    saveTimer.current = setTimeout(async () => {
+      await encountersApi.updateInput(encounterId, value, templateId);
+      // Re-scan for red flags only after the new transcript is actually persisted — otherwise
+      // this could race the PATCH above and read the still-stale transcript.
+      encountersApi.getRedFlags(encounterId).then(setRedFlags);
     }, 600);
   }
 
@@ -158,6 +164,16 @@ export function EncounterWorkspacePage() {
             onTemplateChange={onTemplateChange}
             disabled={generating}
           />
+          {redFlags.length > 0 && (
+            <div className="red-flags-banner" role="status">
+              <p className="red-flags-banner__title">⚠ Possible red flags — review before generating</p>
+              <ul>
+                {redFlags.map((flag) => (
+                  <li key={flag.id}>{flag.message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <button type="button" onClick={onGenerate} disabled={generating || transcript.trim().length === 0}>
             {generating ? "Generating..." : "Generate note"}
           </button>
