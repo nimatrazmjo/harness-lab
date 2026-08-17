@@ -11,8 +11,10 @@
 
 > **Session protocol — every agent, every session:**
 >
-> 1. **Resume & verify baseline:** read `session-handoff.md`, then run the _Start clean_ gate in
->    `clean-state-checklist.md` — the baseline must be green before you build on it.
+> 1. **Resume & verify baseline:** read `session-handoff.md`, then run `bash init.sh` to verify
+>    the project builds cleanly. **If it fails, fix build errors before proceeding** — never
+>    build new work on a broken baseline. Then complete the rest of the _Start clean_ gate in
+>    `clean-state-checklist.md`.
 > 2. **Orient:** skim `progress.md` (where we've been), `docs/PRODUCT.md` + `docs/ARCHITECTURE.md`
 >    (what/why + how), and `feature-list.json` (what's next).
 > 3. **Work** the next `failing` feature (see §5), or resume the in-flight one from the handoff.
@@ -81,8 +83,9 @@ libs/
   shared-types/   # DTOs + zod schemas shared by api AND web (single contract source)
   ai/             # prompt templates, model client, tool/function-call definitions
 infra/            # nginx conf, docker-compose (local pg+pgvector), IaC / deploy notes
-tools/            # init.sh, seed scripts, icd10 embedding loader
+tools/            # tools/init.sh (full env bootstrap), seed scripts, icd10 embedding loader
 docs/             # PRODUCT.md (what & why) + ARCHITECTURE.md (how it fits together)
+init.sh            # fast build-verify gate: install + typecheck + build. Run every session.
 AGENTS.md          # this file — the harness contract (source of truth)
 CLAUDE.md          # one-line bridge: imports AGENTS.md for Claude Code
 progress.md        # rolling log: durable, append-only history (append at session end)
@@ -105,7 +108,8 @@ A backend contract change that breaks the frontend must fail at **typecheck**, n
 ## 4. Commands (the agent-facing verbs)
 
 ```bash
-pnpm setup          # ./tools/init.sh — install deps, start local pg+pgvector, run migrations, seed
+bash init.sh        # fast build-verify gate: install + typecheck + build. Run at every session start.
+pnpm setup          # ./tools/init.sh — ONE-TIME env bootstrap: local pg+pgvector, migrations, seed
 pnpm dev            # run api + web
 pnpm verify         # THE gate: lint + typecheck + test + build. Must exit 0 before "done".
 pnpm test:e2e       # API e2e (supertest) + web e2e (Playwright)
@@ -114,7 +118,13 @@ pnpm db:seed        # 3 provider accounts + 1 admin (hashed passwords) + 200–3
 pnpm icd10:embed    # compute + store embeddings for the ICD-10 subset into pgvector
 ```
 
-`pnpm verify` is the keystone. Run it after every slice. **Success is silent; failures are
+Three gates, three jobs — don't confuse them: **`bash init.sh`** is the first thing you run every
+session (no Docker, no DB, just install/typecheck/build — fast and side-effect-free). **`pnpm
+verify`** is the fuller gate (adds lint + tests) — required green before a feature is `passing`.
+**`pnpm setup`** is a one-time (or after-infra-change) environment bootstrap — it touches Docker
+and the database, so it's heavier and isn't a per-session habit.
+
+`pnpm verify` is the keystone for finishing a feature. **Success is silent; failures are
 verbose.**
 
 ---
