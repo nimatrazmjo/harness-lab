@@ -1,0 +1,291 @@
+/** Curated subset of real ICD-10-CM codes for the demo's embedded semantic search set. */
+export interface Icd10SeedEntry {
+  code: string;
+  description: string;
+}
+
+export const ICD10_SEED_DATA: Icd10SeedEntry[] = [
+  // Infectious & parasitic
+  { code: "A09", description: "Infectious gastroenteritis and colitis, unspecified" },
+  { code: "B34.9", description: "Viral infection, unspecified" },
+  { code: "J02.9", description: "Acute pharyngitis, unspecified" },
+  { code: "J03.90", description: "Acute tonsillitis, unspecified" },
+  { code: "J06.9", description: "Acute upper respiratory infection, unspecified" },
+  { code: "A49.9", description: "Bacterial infection, unspecified" },
+  { code: "B99.9", description: "Unspecified infectious disease" },
+  { code: "L01.00", description: "Impetigo, unspecified" },
+  { code: "L03.90", description: "Cellulitis, unspecified" },
+  { code: "N39.0", description: "Urinary tract infection, site not specified" },
+
+  // Endocrine, nutritional, metabolic
+  { code: "E11.9", description: "Type 2 diabetes mellitus without complications" },
+  { code: "E11.65", description: "Type 2 diabetes mellitus with hyperglycemia" },
+  { code: "E10.9", description: "Type 1 diabetes mellitus without complications" },
+  { code: "E03.9", description: "Hypothyroidism, unspecified" },
+  { code: "E05.90", description: "Thyrotoxicosis, unspecified without thyrotoxic crisis" },
+  { code: "E66.9", description: "Obesity, unspecified" },
+  { code: "E78.5", description: "Hyperlipidemia, unspecified" },
+  { code: "E86.0", description: "Dehydration" },
+  { code: "E55.9", description: "Vitamin D deficiency, unspecified" },
+  { code: "E61.1", description: "Iron deficiency" },
+
+  // Mental & behavioral
+  { code: "F32.9", description: "Major depressive disorder, single episode, unspecified" },
+  { code: "F41.1", description: "Generalized anxiety disorder" },
+  { code: "F41.9", description: "Anxiety disorder, unspecified" },
+  { code: "F43.10", description: "Post-traumatic stress disorder, unspecified" },
+  { code: "F43.20", description: "Adjustment disorder, unspecified" },
+  { code: "F51.01", description: "Primary insomnia" },
+  { code: "F90.9", description: "Attention-deficit hyperactivity disorder, unspecified type" },
+
+  // Nervous system
+  { code: "G43.909", description: "Migraine, unspecified, not intractable, without status migrainosus" },
+  { code: "G44.209", description: "Tension-type headache, unspecified, not intractable" },
+  { code: "G47.00", description: "Insomnia, unspecified" },
+  { code: "G47.33", description: "Obstructive sleep apnea (adult) (pediatric)" },
+  { code: "G56.00", description: "Carpal tunnel syndrome, unspecified upper limb" },
+  { code: "G62.9", description: "Polyneuropathy, unspecified" },
+  { code: "R51.9", description: "Headache, unspecified" },
+
+  // Eye
+  { code: "H10.9", description: "Unspecified conjunctivitis" },
+  { code: "H52.4", description: "Presbyopia" },
+  { code: "H53.9", description: "Unspecified visual disturbance" },
+  { code: "H61.20", description: "Impacted cerumen, unspecified ear" },
+  { code: "H66.90", description: "Otitis media, unspecified, unspecified ear" },
+  { code: "H81.10", description: "Benign paroxysmal vertigo, unspecified ear" },
+  { code: "H92.09", description: "Otalgia, unspecified ear" },
+
+  // Circulatory
+  { code: "I10", description: "Essential (primary) hypertension" },
+  { code: "I25.10", description: "Atherosclerotic heart disease of native coronary artery without angina pectoris" },
+  { code: "I48.91", description: "Unspecified atrial fibrillation" },
+  { code: "I50.9", description: "Heart failure, unspecified" },
+  { code: "I83.90", description: "Varicose veins of unspecified lower extremity without complications" },
+  { code: "I95.9", description: "Hypotension, unspecified" },
+  { code: "R00.0", description: "Tachycardia, unspecified" },
+  { code: "R00.1", description: "Bradycardia, unspecified" },
+  { code: "R03.0", description: "Elevated blood pressure reading, without diagnosis of hypertension" },
+  { code: "R06.02", description: "Shortness of breath" },
+
+  // Respiratory
+  { code: "J00", description: "Acute nasopharyngitis (common cold)" },
+  { code: "J01.90", description: "Acute sinusitis, unspecified" },
+  { code: "J18.9", description: "Pneumonia, unspecified organism" },
+  { code: "J20.9", description: "Acute bronchitis, unspecified" },
+  { code: "J30.9", description: "Allergic rhinitis, unspecified" },
+  { code: "J44.9", description: "Chronic obstructive pulmonary disease, unspecified" },
+  { code: "J45.909", description: "Unspecified asthma, uncomplicated" },
+  { code: "J45.20", description: "Mild intermittent asthma, uncomplicated" },
+  { code: "J93.9", description: "Pneumothorax, unspecified" },
+  { code: "R05.9", description: "Cough, unspecified" },
+  { code: "R06.00", description: "Dyspnea, unspecified" },
+  { code: "R07.9", description: "Chest pain, unspecified" },
+
+  // Digestive
+  { code: "K21.9", description: "Gastro-esophageal reflux disease without esophagitis" },
+  { code: "K29.70", description: "Gastritis, unspecified, without bleeding" },
+  { code: "K30", description: "Functional dyspepsia" },
+  { code: "K52.9", description: "Noninfective gastroenteritis and colitis, unspecified" },
+  { code: "K58.9", description: "Irritable bowel syndrome without diarrhea" },
+  { code: "K59.00", description: "Constipation, unspecified" },
+  { code: "K21.0", description: "Gastro-esophageal reflux disease with esophagitis" },
+  { code: "K92.2", description: "Gastrointestinal hemorrhage, unspecified" },
+  { code: "R10.9", description: "Unspecified abdominal pain" },
+  { code: "R10.31", description: "Right lower quadrant pain" },
+  { code: "R11.0", description: "Nausea" },
+  { code: "R11.10", description: "Vomiting, unspecified" },
+  { code: "R19.7", description: "Diarrhea, unspecified" },
+
+  // Skin & subcutaneous
+  { code: "L20.9", description: "Atopic dermatitis, unspecified" },
+  { code: "L23.9", description: "Allergic contact dermatitis, unspecified cause" },
+  { code: "L30.9", description: "Dermatitis, unspecified" },
+  { code: "L29.9", description: "Pruritus, unspecified" },
+  { code: "L50.9", description: "Urticaria, unspecified" },
+  { code: "L70.0", description: "Acne vulgaris" },
+  { code: "L72.0", description: "Epidermal cyst" },
+  { code: "L98.9", description: "Disorder of the skin and subcutaneous tissue, unspecified" },
+  { code: "B02.9", description: "Zoster without complications" },
+
+  // Musculoskeletal
+  { code: "M17.9", description: "Osteoarthritis of knee, unspecified" },
+  { code: "M16.9", description: "Osteoarthritis of hip, unspecified" },
+  { code: "M19.90", description: "Unspecified osteoarthritis, unspecified site" },
+  { code: "M25.50", description: "Pain in unspecified joint" },
+  { code: "M25.551", description: "Pain in right hip" },
+  { code: "M25.552", description: "Pain in left hip" },
+  { code: "M25.561", description: "Pain in right knee" },
+  { code: "M25.562", description: "Pain in left knee" },
+  { code: "M54.2", description: "Cervicalgia" },
+  { code: "M54.5", description: "Low back pain" },
+  { code: "M54.6", description: "Pain in thoracic spine" },
+  { code: "M54.9", description: "Dorsalgia, unspecified" },
+  { code: "M62.830", description: "Muscle spasm of back" },
+  { code: "M62.81", description: "Muscle weakness (generalized)" },
+  { code: "M65.9", description: "Synovitis and tenosynovitis, unspecified" },
+  { code: "M70.60", description: "Trochanteric bursitis, unspecified hip" },
+  { code: "M75.100", description: "Unspecified rotator cuff tear or rupture of unspecified shoulder, not specified as traumatic" },
+  { code: "M75.30", description: "Calcific tendinitis of unspecified shoulder" },
+  { code: "M76.60", description: "Achilles tendinitis, unspecified leg" },
+  { code: "M77.10", description: "Lateral epicondylitis, unspecified elbow" },
+  { code: "M79.1", description: "Myalgia" },
+  { code: "M79.601", description: "Pain in right arm" },
+  { code: "M79.602", description: "Pain in left arm" },
+  { code: "M79.604", description: "Pain in right leg" },
+  { code: "M79.605", description: "Pain in left leg" },
+  { code: "M79.7", description: "Fibromyalgia" },
+  { code: "M25.60", description: "Stiffness in unspecified joint, not elsewhere classified" },
+  { code: "M99.03", description: "Segmental and somatic dysfunction of lumbar region" },
+
+  // Genitourinary
+  { code: "N23", description: "Unspecified renal colic" },
+  { code: "N30.90", description: "Cystitis, unspecified without hematuria" },
+  { code: "N40.0", description: "Benign prostatic hyperplasia without lower urinary tract symptoms" },
+  { code: "N76.0", description: "Acute vaginitis" },
+  { code: "N92.6", description: "Irregular menstruation, unspecified" },
+  { code: "N94.6", description: "Dysmenorrhea, unspecified" },
+  { code: "R31.9", description: "Hematuria, unspecified" },
+  { code: "R35.0", description: "Frequency of micturition" },
+
+  // Genitourinary (additional)
+  { code: "N39.41", description: "Urge incontinence" },
+  { code: "N43.3", description: "Hydrocele, unspecified" },
+  { code: "N60.9", description: "Benign mammary dysplasia, unspecified" },
+  { code: "N95.1", description: "Menopausal and female climacteric states" },
+
+  // Pregnancy / perinatal
+  { code: "Z34.90", description: "Encounter for supervision of normal pregnancy, unspecified trimester" },
+  { code: "O26.90", description: "Pregnancy related conditions, unspecified, unspecified trimester" },
+  { code: "Z32.01", description: "Encounter for pregnancy test, result positive" },
+  { code: "O21.0", description: "Mild hyperemesis gravidarum" },
+
+  // Ear, nose, throat (additional)
+  { code: "H65.90", description: "Otitis media, unspecified, unspecified ear, unspecified" },
+  { code: "H91.90", description: "Unspecified hearing loss, unspecified ear" },
+  { code: "H93.19", description: "Tinnitus, unspecified ear" },
+  { code: "J31.0", description: "Chronic rhinitis" },
+  { code: "J32.9", description: "Chronic sinusitis, unspecified" },
+  { code: "J34.89", description: "Other specified disorders of nose and nasal sinuses" },
+  { code: "J35.01", description: "Chronic tonsillitis" },
+  { code: "R04.0", description: "Epistaxis" },
+  { code: "R07.0", description: "Pain in throat" },
+  { code: "R49.0", description: "Dysphonia" },
+
+  // Allergy / immunologic
+  { code: "T78.2XXA", description: "Anaphylactic reaction, unspecified, initial encounter" },
+  { code: "Z88.0", description: "Allergy status to penicillin" },
+  { code: "J45.901", description: "Unspecified asthma with (acute) exacerbation" },
+
+  // Additional cardiovascular
+  { code: "I73.9", description: "Peripheral vascular disease, unspecified" },
+  { code: "I87.2", description: "Venous insufficiency (chronic) (peripheral)" },
+  { code: "I20.9", description: "Angina pectoris, unspecified" },
+  { code: "I63.9", description: "Cerebral infarction, unspecified" },
+  { code: "R00.2", description: "Palpitations" },
+
+  // Additional endocrine / metabolic
+  { code: "E16.2", description: "Hypoglycemia, unspecified" },
+  { code: "E83.42", description: "Hypomagnesemia" },
+  { code: "E87.6", description: "Hypokalemia" },
+  { code: "E87.1", description: "Hypo-osmolality and hyponatremia" },
+  { code: "R73.03", description: "Prediabetes" },
+
+  // Additional digestive
+  { code: "K59.1", description: "Functional diarrhea" },
+  { code: "K64.9", description: "Unspecified hemorrhoids" },
+  { code: "K80.20", description: "Calculus of gallbladder without cholecystitis without obstruction" },
+  { code: "K85.90", description: "Acute pancreatitis without necrosis or infection, unspecified" },
+  { code: "R14.0", description: "Abdominal distension (gaseous)" },
+
+  // Additional musculoskeletal
+  { code: "M06.9", description: "Rheumatoid arthritis, unspecified" },
+  { code: "M10.9", description: "Gout, unspecified" },
+  { code: "M41.9", description: "Scoliosis, unspecified" },
+  { code: "M43.16", description: "Spondylolisthesis, lumbar region" },
+  { code: "M47.816", description: "Spondylosis without myelopathy or radiculopathy, lumbar region" },
+  { code: "M51.36", description: "Other intervertebral disc degeneration, lumbar region" },
+  { code: "M53.2X7", description: "Spinal instabilities, lumbosacral region" },
+  { code: "M67.40", description: "Ganglion, unspecified site" },
+  { code: "M72.2", description: "Plantar fascial fibromatosis" },
+
+  // Additional mental / behavioral
+  { code: "F17.210", description: "Nicotine dependence, cigarettes, uncomplicated" },
+  { code: "F31.9", description: "Bipolar disorder, unspecified" },
+  { code: "F40.10", description: "Social phobia, unspecified" },
+
+  // Additional skin
+  { code: "L03.116", description: "Cellulitis of right lower limb" },
+  { code: "L03.115", description: "Cellulitis of left lower limb" },
+  { code: "L08.9", description: "Local infection of the skin and subcutaneous tissue, unspecified" },
+  { code: "L60.0", description: "Ingrowing nail" },
+
+  // Additional injury
+  { code: "S00.83XA", description: "Contusion of other part of head, initial encounter" },
+  { code: "S60.919A", description: "Unspecified superficial injury of unspecified hand, initial encounter" },
+  { code: "S80.01XA", description: "Contusion of right knee, initial encounter" },
+  { code: "S90.401A", description: "Unspecified superficial injury of right foot, initial encounter" },
+  { code: "T15.00XA", description: "Foreign body on external eye, unspecified eye, initial encounter" },
+
+  // Symptoms & signs (general)
+  { code: "R50.9", description: "Fever, unspecified" },
+  { code: "R51", description: "Headache" },
+  { code: "R53.83", description: "Other fatigue" },
+  { code: "R55", description: "Syncope and collapse" },
+  { code: "R42", description: "Dizziness and giddiness" },
+  { code: "R41.0", description: "Disorientation, unspecified" },
+  { code: "R63.4", description: "Abnormal weight loss" },
+  { code: "R63.5", description: "Abnormal weight gain" },
+  { code: "R60.9", description: "Edema, unspecified" },
+  { code: "R09.02", description: "Hypoxemia" },
+  { code: "R21", description: "Rash and other nonspecific skin eruption" },
+  { code: "R22.9", description: "Localized swelling, mass and lump, unspecified" },
+  { code: "R25.1", description: "Tremor, unspecified" },
+  { code: "R26.9", description: "Unspecified abnormalities of gait and mobility" },
+  { code: "R40.0", description: "Somnolence" },
+  { code: "R45.4", description: "Irritability and anger" },
+  { code: "R56.9", description: "Unspecified convulsions" },
+  { code: "R59.9", description: "Enlarged lymph nodes, unspecified" },
+  { code: "R68.83", description: "Chills (without fever)" },
+
+  // Injury & external causes
+  { code: "S06.0X0A", description: "Concussion without loss of consciousness, initial encounter" },
+  { code: "S13.4XXA", description: "Sprain of ligaments of cervical spine, initial encounter" },
+  { code: "S16.1XXA", description: "Strain of muscle, fascia and tendon at neck level, initial encounter" },
+  { code: "S23.3XXA", description: "Sprain of ligaments of thoracic spine, initial encounter" },
+  { code: "S33.5XXA", description: "Sprain of ligaments of lumbar spine, initial encounter" },
+  { code: "S39.012A", description: "Strain of muscle, fascia and tendon of lower back, initial encounter" },
+  { code: "S43.401A", description: "Unspecified sprain of right shoulder joint, initial encounter" },
+  { code: "S43.402A", description: "Unspecified sprain of left shoulder joint, initial encounter" },
+  { code: "S46.011A", description: "Strain of muscle, fascia and tendon of the rotator cuff, right shoulder, initial encounter" },
+  { code: "S53.401A", description: "Unspecified sprain of right elbow, initial encounter" },
+  { code: "S61.409A", description: "Unspecified open wound of unspecified hand, initial encounter" },
+  { code: "S63.501A", description: "Unspecified sprain of right wrist, initial encounter" },
+  { code: "S63.502A", description: "Unspecified sprain of left wrist, initial encounter" },
+  { code: "S72.001A", description: "Fracture of unspecified part of neck of right femur, initial encounter" },
+  { code: "S82.90XA", description: "Unspecified fracture of unspecified lower leg, initial encounter" },
+  { code: "S83.401A", description: "Sprain of medial collateral ligament of right knee, initial encounter" },
+  { code: "S83.402A", description: "Sprain of medial collateral ligament of left knee, initial encounter" },
+  { code: "S86.019A", description: "Strain of right Achilles tendon, initial encounter" },
+  { code: "S91.301A", description: "Unspecified open wound of right foot, initial encounter" },
+  { code: "S93.401A", description: "Sprain of unspecified ligament of right ankle, initial encounter" },
+  { code: "S93.402A", description: "Sprain of unspecified ligament of left ankle, initial encounter" },
+  { code: "T14.90XA", description: "Injury, unspecified, initial encounter" },
+  { code: "T78.40XA", description: "Allergy, unspecified, initial encounter" },
+  { code: "W19.XXXA", description: "Unspecified fall, initial encounter" },
+
+  // Factors influencing health status / follow-up
+  { code: "Z00.00", description: "Encounter for general adult medical examination without abnormal findings" },
+  { code: "Z00.129", description: "Encounter for routine child health examination without abnormal findings" },
+  { code: "Z01.419", description: "Encounter for gynecological examination without abnormal findings" },
+  { code: "Z09", description: "Encounter for follow-up examination after completed treatment" },
+  { code: "Z23", description: "Encounter for immunization" },
+  { code: "Z71.3", description: "Dietary counseling and surveillance" },
+  { code: "Z79.4", description: "Long term (current) use of insulin" },
+  { code: "Z79.899", description: "Other long term (current) drug therapy" },
+  { code: "Z71.89", description: "Other specified counseling" },
+  { code: "Z87.891", description: "Personal history of nicotine dependence" },
+  { code: "Z96.651", description: "Presence of right artificial knee joint" },
+  { code: "Z96.652", description: "Presence of left artificial knee joint" },
+  { code: "Z98.890", description: "Other specified postprocedural states" },
+];
