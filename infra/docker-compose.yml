@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: scribe-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scribe
+      POSTGRES_PASSWORD: scribe
+      POSTGRES_DB: scribe
+    ports:
+      # Host port 5433 — 5432 is occupied by an unrelated project's container on this machine.
+      - "5433:5432"
+    volumes:
+      - scribe-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scribe -d scribe"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  scribe-pgdata:
