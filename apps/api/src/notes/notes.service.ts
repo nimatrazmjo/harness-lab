@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import type { NoteVersion, SoapNote } from "@scribe/shared-types";
 import { AuditService } from "../audit/audit.service";
 import type { CurrentUserPayload } from "../auth/current-user.decorator";
+import { DraftsRepository } from "../drafts/drafts.repository";
 import { EncountersRepository } from "../encounters/encounters.repository";
 import { EncountersService } from "../encounters/encounters.service";
 import { toNoteVersionDto } from "./notes.mapper";
@@ -14,6 +15,7 @@ export class NotesService {
     private readonly encountersService: EncountersService,
     private readonly encountersRepo: EncountersRepository,
     private readonly audit: AuditService,
+    private readonly drafts: DraftsRepository,
   ) {}
 
   async save(encounterId: string, user: CurrentUserPayload, note: SoapNote): Promise<NoteVersion> {
@@ -31,6 +33,8 @@ export class NotesService {
     });
 
     await this.encountersRepo.updateStatus(encounterId, "saved");
+    // Work is now captured as an immutable version — the ephemeral draft copy is stale/redundant.
+    await this.drafts.deleteByEncounterId(encounterId);
     await this.audit.log({
       actorId: user.id,
       action: "note.save",

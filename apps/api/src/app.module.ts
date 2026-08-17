@@ -5,6 +5,7 @@ import { AuditModule } from "./audit/audit.module";
 import { AuthModule } from "./auth/auth.module";
 import { ConfigModule } from "./config/config.module";
 import { DatabaseModule } from "./database/database.module";
+import { DraftsModule } from "./drafts/drafts.module";
 import { EncountersModule } from "./encounters/encounters.module";
 import { HealthModule } from "./health/health.module";
 import { Icd10Module } from "./icd10/icd10.module";
@@ -26,6 +27,7 @@ import { TemplatesModule } from "./templates/templates.module";
     HealthModule,
     AdminModule,
     TemplatesModule,
+    DraftsModule,
   ],
 })
 export class AppModule {}
