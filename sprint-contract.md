@@ -17,98 +17,98 @@ goalposts or drift into adjacent work — the two most common ways an agent fake
 
 ## Active sprint
 
-**Feature(s):** `infra.env_secrets`, `infra.connection_pooling`, `infra.schema_erd`, `auth.login`,
-`auth.roles_seed`, `auth.tenant_isolation`, `encounter.create`, `encounter.input`,
-`scribe.generate_stream`, `scribe.soap_sections`, `scribe.icd10_assessment`, `note.inline_edit`,
-`note.save`, `note.versioning_immutable`, `note.version_history`
-**Goal (one sentence):** A provider can log in, start an encounter, paste a transcript, watch a
-SOAP note stream in with real ICD-10 codes, edit it, and save it as an immutable, retrievable
-version — all backed by Postgres+pgvector, with `infra.rds_postgres_private`/`infra.ec2_nginx_tls`
-code-ready but not deployed (no AWS account access in this environment).
-**Tier:** 0 · **Branch:** `feat/tier-0-core-loop`
-
-_Note: this sprint predates `sprint-contract.md`/`evaluator-rubric.md` being added to the repo —
-this is a retroactive contract written to check already-completed work against the new gates, not
-a before-the-fact plan. Every sprint from here forward gets one of these filled first._
+**Feature(s):** `patient.match`, `context.history_injection`, `context.behavior_differs`
+**Goal (one sentence):** A returning patient (same first+last+DOB) is recognized and linked to
+one patient record, and the AI's generation for that patient is demonstrably informed by their
+prior encounter history — fetched by a backend tool call, never supplied by the client — while a
+first-time patient's generation shows no such influence.
+**Tier:** 1 · **Branch:** `feat/patient-context-matching`
 
 ### In scope (only these)
 
-- Monorepo scaffold (pnpm workspaces, shared TS/ESLint config)
-- `libs/shared-types` (zod contracts), `libs/ai` (model-client abstraction + mock provider +
-  clinical-safety gate + best-effort untested Bedrock provider)
-- DB schema + migrations + ERD for all 8 tables
-- API: secrets loading, bounded pg pool, JWT auth + roles + tenant isolation, encounter
-  create/input, SSE-streamed scribe generation, pgvector ICD-10 search, immutable note versioning
-  + save + history, seed script + ICD-10 embedding job
-- Web: login, encounter list/create, workspace (transcript input → streaming generation → inline
-  edit → save → version history)
-- `infra/` config for RDS-private and EC2+nginx+TLS (written, NOT deployed)
+- Dedicated e2e test coverage proving `patient.match`, `context.history_injection`, and
+  `context.behavior_differs` at the three test paths `feature-list.json` names
+- Fixing anything those tests reveal is actually broken (expected: none — see rationale below)
 
 ### Explicitly OUT of scope (do not touch this sprint)
 
-- Real AWS provisioning (needs a human with account access)
-- All Tier 1/2 features: patient matching, context-injection-specific tests, ICD-10 search widget,
-  admin CRUD, draft persistence, audit query surface, pioneer features
-- Playwright web e2e (only Vitest component tests exist for web so far)
+- ICD-10 search widget, admin CRUD, session/draft persistence, audit query surface — separate
+  Tier 1 sprints
+- Any change to the mock/Bedrock model-client behavior itself (only testing what exists)
+
+### Rationale — why this is mostly a test-writing sprint, not a build sprint
+
+Tier 0 already built the underlying plumbing as a side effect of doing encounter creation and
+scribe generation correctly:
+
+- `EncountersService.create()` calls `PatientsRepository.findOrCreate({firstName, lastName, dob})`
+  — patient identity IS the dedup key already (`patients` table has a `UNIQUE(first_name,
+  last_name, dob)` constraint). This is `patient.match`'s entire acceptance criterion.
+- `ScribeService.generate()` always constructs a real `patientHistoryTool` backed by
+  `EncountersRepository.listPriorForPatient()` + `NotesRepository.getLatestPerEncounter()` and
+  passes it into `model.generateSoapNote()` — never populated by request body. `ScribeController
+  .generate()` has **no `@Body()` parameter at all**, so there is no code path for a client to
+  inject prior history even if it tried. `MockModelClient` already calls this tool and changes the
+  Plan text when prior history exists vs. when it's empty (unit-tested in
+  `libs/ai/src/__tests__/mock-provider.test.ts`).
+
+What's missing is **dedicated e2e coverage proving this through the real API**, not new
+implementation — exactly the kind of gap the Tier 0 evaluator pass flagged as a pattern to watch
+for (features that are "accidentally correct" but unverified at the e2e level).
 
 ### Done conditions (testable — from feature-list.json acceptance, expanded)
 
-- [x] No secret/credential anywhere in the repo — `scripts/check-no-committed-secrets.sh` passes
-- [x] `.env` git-ignored, `.env.example` placeholder-only — `git status` / `cat .gitignore`
-- [x] One shared pg Pool, bounded, reused across requests — `pool.e2e-spec.ts` (30 concurrent
-      requests stay ≤ `DB_POOL_MAX`; same `Pool` instance reused)
-- [x] Schema created only via migrations; ERD defensible table-by-table — `apps/api/migrations/*`,
-      `docs/erd.md`
-- [x] Login issues a JWT (role + expiry claims), argon2-hashed passwords, deactivated → rejected —
-      `auth.e2e-spec.ts`
-- [x] 3 providers + 1 admin seeded with hashed passwords; roles enforced by a guard —
-      `apps/api/src/seed/seed.ts` (run + verified), `roles.e2e-spec.ts`
-- [x] Provider B requesting Provider A's encounter → 403; admin bypass works; list is scoped —
-      `tenant-isolation.e2e-spec.ts`
-- [x] Encounter created + linked to provider/patient, persists to RDS; patient deduped by
-      (first,last,dob) — `encounter.e2e-spec.ts`
-- [x] Transcript textarea accepts input, persists on the open encounter — `encounter.e2e-spec.ts`
-      + `apps/web/.../input.test.tsx`
-- [x] Generation streams >1 SSE chunk over measurable time, not one blob; SSE content-type headers
-      — `scribe-stream.e2e-spec.ts`
-- [x] All four SOAP sections present and populated from transcript content, not boilerplate —
-      `soap-structure.e2e-spec.ts`
-- [x] ≥1 ICD-10 code in the Assessment, sourced only from the embedded DB set (no fabrication) —
-      `icd10-assessment.e2e-spec.ts` (asserts every returned code exists in `icd10_codes`)
-- [x] All SOAP sections editable in place; edits preserved to save —
-      `apps/web/.../edit.test.tsx`
-- [x] Save writes to `note_versions` in RDS, tied to encounter + provider —
-      `note-save.e2e-spec.ts`
-- [x] Re-save INSERTs a new version; version 1 byte-for-byte unchanged; no UPDATE/DELETE path
-      exists; concurrent saves don't collide on version_number —
-      `note-versioning.e2e-spec.ts` (incl. 5-concurrent-save race test)
-- [x] Version history lists every version with author + timestamp, read from RDS —
-      `note-versioning.e2e-spec.ts` + `apps/web/.../history.test.tsx`
+- [ ] Starting an encounter for an existing patient (same first+last+DOB) links to the same
+      `patient_id` as their prior encounter — test: `patient-match.e2e-spec.ts`
+- [ ] A first-time patient (new first+last+DOB) gets a new `patient_id`, distinct from any other
+      patient — test: `patient-match.e2e-spec.ts`
+- [ ] Two patients with different DOBs but the same name are NOT merged (dedup key is the full
+      tuple, not just name) — test: `patient-match.e2e-spec.ts`
+- [ ] For a returning patient, generation output is demonstrably different because prior history
+      was injected (Plan references the prior visit's date/plan) — test: `context-behavior.e2e-spec.ts`
+- [ ] For a first-time patient, generation output shows no prior-visit reference — test:
+      `context-behavior.e2e-spec.ts`
+- [ ] The scribe generate endpoint accepts no request body capable of carrying prior-history data
+      (structural proof, not just behavioral) — test: `context-injection.e2e-spec.ts`
+- [ ] History injection works across providers for the same patient (clinical continuity of care —
+      see invariant note below) but a provider still cannot directly read another provider's
+      encounter record — test: `context-injection.e2e-spec.ts`
 
 ### Invariants that must still hold (AGENTS.md §2)
 
-- [x] SECRETS, PERSISTENCE, TENANT-ISOLATION, VERSION-IMMUTABILITY, STREAMING, CONTEXT-INJECTION,
-      POOLING, CLINICAL-SAFETY — all touched by this sprint, all covered by a test (see above)
-- [ ] RDS-PRIVATE — **not achievable this sprint**: no real AWS account access. Local Postgres
-      stands in for dev; `infra.rds_postgres_private`/`infra.ec2_nginx_tls` stay `blocked`.
+- [ ] CONTEXT-INJECTION (primary) — prior history via backend tool call only, never client-supplied
+- [ ] TENANT-ISOLATION — **explicit design note, not a violation:** `patientHistoryTool` scopes by
+      `patient_id`, not `provider_id`, so Provider B's generation for a shared patient CAN be
+      informed by Provider A's prior assessment/plan text for that same patient. This is
+      intentional (real clinical continuity of care — any provider treating a patient benefits
+      from their history, same as a real EHR) and distinct from the invariant, which is about
+      direct CRUD access to another provider's *encounter record* (still 403, unaffected). Called
+      out explicitly here so it's defensible in a walkthrough, not discovered as a surprise.
+- [ ] PERSISTENCE — patient/history reads still go through RDS only
 
 ### Verification plan (how each condition is proven)
 
-- `pnpm verify` (lint+typecheck+test+build, all 4 packages) exits 0
-- `pnpm --filter api run test:e2e` — 27 tests, real Postgres+pgvector, no mocked DB
-- `pnpm --filter @scribe/ai run test` (10) + `pnpm --filter web run test` (10) + `pnpm --filter api run test` (7)
-- Manual browser walkthrough (Chrome via MCP) against the compiled API + local Postgres: login →
-  create encounter → paste transcript → watch streaming generation → verify real ICD-10 matches →
-  edit → save → reload → confirm version history
+- `apps/api/test/patient-match.e2e-spec.ts` — create two encounters with identical patient
+  identity, assert same `patient_id`; create one with a different DOB, assert a different
+  `patient_id`
+- `apps/api/test/context-behavior.e2e-spec.ts` — for the same patient: save a note on encounter 1,
+  create encounter 2 for that patient, generate, assert the Plan text contains the prior visit's
+  date. For a fresh patient: generate on their first encounter, assert the Plan text does NOT
+  reference a prior visit.
+- `apps/api/test/context-injection.e2e-spec.ts` — assert `POST .../scribe/generate` ignores any
+  JSON body sent to it (proving no client-side history injection path exists); assert Provider B
+  generating for a patient Provider A previously saw gets history-informed output, while Provider
+  B still gets 403 trying to `GET` Provider A's encounter directly.
+- `pnpm run verify` green; `pnpm --filter api run test:e2e` all green (existing 29 + new tests)
 
 ### Definition of done
 
-- [x] Every _Done condition_ checked with evidence (test names above, all currently green)
-- [x] `pnpm verify` green; _Leave clean_ gate passed
-- [x] `evaluator-rubric.md` scored **PASS** on all 7 dimensions by an independent subagent with no
-      authorship context (see that file's Output section) — one non-blocking gap it found
-      (no HTTP-level test for garbage input on the live SSE route) was closed same-session via
-      `apps/api/test/edge-no-content.e2e-spec.ts`
-- [x] `feature-list.json` status → `passing` for 15/17 Tier 0 items (2 `blocked` on AWS access),
-      plus `edge.no_clinical_content` (Tier 1, its dependency chain was already satisfied and the
-      new test genuinely covers it); `progress.md` + `session-handoff.md` updated
+- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced all 7 live
+      against a running instance (not just via the new tests)
+- [x] `pnpm verify` green (36/36 e2e); _Leave clean_ gate passed
+- [x] `evaluator-rubric.md` scored — 5/7 PASS, 2/7 CONDITIONAL (both flagging the same issue: the
+      TENANT-ISOLATION carve-out below wasn't yet human-confirmed). **Resolved**: presented the
+      exact tradeoff to the user, who confirmed patient-scoped history is intended behavior. Now
+      recorded as a clarified invariant in `AGENTS.md` §2 (TENANT-ISOLATION), not left as an
+      agent's unilateral interpretation.
+- [x] `feature-list.json` → `passing` for all three; `progress.md` + `session-handoff.md` updated
