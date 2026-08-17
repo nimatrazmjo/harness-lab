@@ -61,25 +61,34 @@ model choice, schema, streaming approach, VPC/secrets. If it can't be explained,
 _Prior sprints' scorecards are preserved in git history (search commit messages for
 "docs: record evaluator pass"). This section holds the latest sprint only._
 
-**Sprint:** `pioneer.version_diff` (first Tier 2 pioneer feature) · **Overall: PASS** (7/7, no
-CONDITIONALs)
+**Sprint:** `pioneer.red_flags` (second Tier 2 pioneer feature) · **Overall: CONDITIONAL → both
+required fixes closed same session**
 
-Evaluated 2026-08-17 by a fresh subagent with no authorship context. Diffed scope: entirely
-`apps/web` — `diff.ts` (new, hand-rolled LCS line-diff, no external dependency), `VersionDiff.tsx`
-(new), `__tests__/diff.test.tsx` (new, 9 tests), compare-dropdown wiring in
-`EncounterWorkspacePage.tsx`, presentational CSS. Zero backend/`libs/` changes.
+Evaluated 2026-08-17 by a fresh subagent with no authorship context. Diffed scope:
+`libs/ai/src/red-flags.ts` (new, deterministic regex pattern list, no LLM call),
+`apps/api/src/encounters/encounters.controller.ts` (+`GET :id/red-flags`, tenant-scoped),
+`red-flags.e2e-spec.ts` (new), frontend wiring in `EncounterWorkspacePage.tsx` (advisory banner,
+never disables Generate). Confirmed zero touches to `ScribeService`/`MockModelClient` — detection
+is fully decoupled from generation.
 
-| #   | Dimension             | Verdict | Evidence / why |
-| --- | ---------------------- | ------- | -------------- |
-| 1   | Contract fulfillment  | PASS    | All 5 Done conditions reproduced live in a real browser (not just via the suite): a genuine Plan edit across two saved versions produced an exact removed/added line pair, unchanged sections tagged `(unchanged)`, v1-vs-v1 rendered a clean no-op diff. |
-| 2   | Correctness           | PASS    | Ran the real API+web against local Postgres, logged in, drove the two `<select>` compare dropdowns via the DOM, screenshotted the resulting diff — matched the actual saved edit exactly. |
-| 3   | Invariants (§2)       | PASS    | VERSION-IMMUTABILITY: confirmed by reading the code that `diff.ts`/`VersionDiff.tsx` only ever read `NoteVersion.note.*`, make no API calls, and write nothing back to `note_versions`. |
-| 4   | Verification quality  | PASS    | Read the full test file — assertions check real diff content (specific added/removed lines), not "rendered without crashing." Separately wrote and ran its OWN adversarial test cases against the raw `diffLines` algorithm (deleted after, not left in the repo): disjoint text, both/either input empty, a repeated-line pattern (`a/b/a/b/a` vs `a/b/a`), a 1-character change in a long single line, and whitespace-only differences — all produced correct, coherent output, confirming the hand-rolled LCS isn't just passing on easy cases. |
-| 5   | No regressions        | PASS    | `pnpm run verify` → exit 0. `pnpm --filter web run test` → 30/30 (21 prior + 9 new), exact match. |
-| 6   | Scope discipline      | PASS    | Diff confined entirely to `apps/web` + `sprint-contract.md`; zero touches to `apps/api` or `libs/`. |
-| 7   | Explainability        | PASS    | The LCS backtrack tie-break is standard and defensible; the ICD-10 diff is a straightforward set-diff keyed on code, matching the contract's stated scope. One documented edge case (not a bug): a code appearing in both versions with a changed description shows as "unchanged" with the new description — the contract itself states this is acceptable since ICD-10 codes are canonical and don't change meaning independently of the code. |
+| #   | Dimension             | Verdict     | Evidence / why |
+| --- | ---------------------- | ----------- | -------------- |
+| 1   | Contract fulfillment  | PASS        | All 6 Done conditions reproduced live via curl: owner GET returns matched flags, non-owner 403, no-token 401, multiple distinct flags all returned. |
+| 2   | Correctness           | CONDITIONAL | Happy path works end-to-end in the browser. But adversarially forcing network latency uncovered a **pre-existing, out-of-scope bug**: a cross-cycle race in the transcript-autosave debounce (present since Tier 0, not introduced by this sprint — the intra-cycle await fix this sprint made is itself correct) can persist a stale transcript and generate a note from it under elevated latency. Confirmed via direct DB query and a screenshot of the resulting note. Tracked as its own follow-up in `progress.md`, not bundled into this sprint's fix. |
+| 3   | Invariants (§2)       | PASS        | TENANT-ISOLATION and CLINICAL-SAFETY (advisory-only, verified the Generate button's `disabled` state directly, then clicked it while flags were showing — generation proceeded normally) both hold. The race in dimension 2 is a separate, pre-existing mechanism this diff didn't create. |
+| 4   | Verification quality  | FAIL → fixed same session | Wrote independent adversarial inputs against `detectRedFlags` and found real false negatives the shipped test suite didn't cover: the literal phrase "difficulty breathing" didn't match its own pattern; plural "seizures"/"convulsions" didn't match (`\bseizure\b` fails on "seizures" — word-boundary placement bug); "sudden onset severe headache" missed; a chest-pain pattern's `.{0,40}` gap couldn't span a line break. **Closed same session**: fixed all four (2 were the evaluator's explicit required fixes; 2 were its non-blocking recommendations, fixed anyway since they were cheap and clearly real), added 5 regression tests, and added an explicit code comment documenting the deliberate no-negation-detection design choice (over-flag, not under-flag, for an advisory safety tool). |
+| 5   | No regressions        | PASS        | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 82/82. `pnpm --filter @scribe/ai run test` → 22/22 at evaluation time, now 27/27 after the regression tests. |
+| 6   | Scope discipline      | PASS        | Grepped `apps/api/src/scribe/*` and `mock-provider.ts` — zero references to red-flag detection; confirmed fully decoupled from generation as the contract requires. |
+| 7   | Explainability        | CONDITIONAL → resolved | The pattern gaps (dimension 4) were unacknowledged before this pass; now documented via the negation-design comment and covered by tests. The autosave race (dimension 2) is now explicitly tracked rather than silently left for a future session to rediscover. |
 
-**Required fixes before closing:** none.
+**Required fixes before closing:** both closed same session — `difficulty-breathing` literal
+phrase, `seizure`/`convulsion` plural forms. (Non-blocking recommendations also closed: multiline
+gap matching, negation-behavior documentation.)
+
+**Tracked, not fixed here** (pre-existing, out of this sprint's contract): a cross-cycle race in
+`EncounterWorkspacePage`'s transcript-autosave debounce can persist/generate from a stale
+transcript under elevated network latency. Needs its own sprint-contract since it touches core
+Tier 0/1 code — see `progress.md`.
 
 **Only when Overall is PASS (or an accepted CONDITIONAL):** flip `feature-list.json` → `passing`,
 then update `progress.md` and `session-handoff.md`.

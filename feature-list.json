@@ -682,7 +682,7 @@
       "id": "pioneer.red_flags",
       "tier": 2,
       "title": "Pioneer: clinical red-flag flagging",
-      "status": "failing",
+      "status": "passing",
       "description": "Automatically flag clinical red flags in the transcript before note generation.",
       "acceptance": [
         "Red-flag terms/patterns are surfaced to the provider before generation.",

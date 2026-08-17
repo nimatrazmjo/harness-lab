@@ -14,16 +14,25 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** Tier 1 complete (16/16). First Tier 2 pioneer feature
-  (`pioneer.version_diff`) also code-complete, verified, and independently evaluated PASS.
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 16 / 16 passing   ·   **Tier 2:** 1 / 4 passing (`pioneer.version_diff`)
+- **Active phase:** Tier 1 complete (16/16). Two Tier 2 pioneer features code-complete, verified,
+  and independently evaluated: `pioneer.version_diff` (PASS) and `pioneer.red_flags`
+  (CONDITIONAL → both required fixes closed same session).
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 16 / 16 passing   ·   **Tier 2:** 2 / 4 passing (`pioneer.version_diff`, `pioneer.red_flags`)
 - **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
   (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
   ideally by a fresh subagent) are part of the session protocol — see AGENTS.md §1/§5/§11.
 - **Next feature:** per `docs/PRODUCT.md`, Tier 2 is "one or two, done well" — not a checklist to
-  complete. Remaining: `pioneer.red_flags` (moderate — real detection pass, advisory only),
-  `pioneer.writing_style` (hard to make genuinely real with the mock model), `pioneer.bulk_pdf`
-  (new PDF-generation dependency).
+  complete. Continuing anyway per explicit user instruction ("continue to finish everything").
+  Remaining: `pioneer.writing_style` (hard to make genuinely real with the mock model),
+  `pioneer.bulk_pdf` (new PDF-generation dependency).
+- **Known gap (tracked, not yet fixed):** a cross-cycle race in
+  `EncounterWorkspacePage`'s transcript-autosave debounce — under elevated network latency, an
+  older `updateInput` PATCH resolving after a newer one can leave the DB with a stale transcript,
+  which then also stales the red-flags banner and the generated note's Subjective section.
+  Discovered by the `pioneer.red_flags` evaluator (confirmed via direct DB query + screenshot).
+  This is a **pre-existing Tier 0/1 mechanism bug**, not introduced by this sprint (this sprint's
+  own intra-cycle fix — awaiting `updateInput` before re-scanning red flags — is itself correct).
+  Needs its own dedicated sprint-contract before being touched, since it's core save-path logic.
 - **Environment:** local bootstrap via `pnpm setup` (`tools/init.sh` → docker-compose Postgres+pgvector on host port **5433** — 5432 is occupied by an unrelated older project on this machine, `~/workstation/ai-clinical-scribe`, don't touch it). `AI_PROVIDER=mock` by default (deterministic, no network calls) — real Bedrock wiring exists in `libs/ai/src/bedrock-provider.ts` but is untested (no AWS creds in this environment).
 - **Open decisions:** none outstanding — raw `pg` + `node-pg-migrate` (not an ORM), zod validation via a custom `ZodValidationPipe`, plain CSS (no UI framework).
 - **Blockers:** `infra.rds_postgres_private` and `infra.ec2_nginx_tls` require an actual AWS account/credentials to provision EC2 + RDS — cannot be done by an agent unattended (see `infra/DEPLOY.md`). Everything code/config-side for both (migrations, nginx.conf, IAM notes, TLS verify script) is ready; only the real cloud provisioning step is outstanding.
@@ -31,6 +40,32 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — pioneer.red_flags (CONDITIONAL → fixed) — second Tier 2 feature
+- Pure deterministic detector (`libs/ai/src/red-flags.ts`, 11 curated regex patterns: chest pain
+  radiating, worst/thunderclap headache, loss of consciousness, suicidal/homicidal ideation,
+  stroke symptoms, anaphylaxis, severe bleeding, difficulty breathing, seizure, overdose) — no LLM
+  call, so no risk of a hallucinated flag. New `GET /encounters/:id/red-flags` (tenant-scoped like
+  every other encounter route). Frontend renders an advisory banner above Generate; the button's
+  `disabled` condition was deliberately left untouched by flags — verified live.
+- Independent evaluator: **CONDITIONAL**, not a clean PASS. Two required fixes: the
+  `difficulty-breathing` pattern didn't match its own literal phrase, and `seizure`/`convulsion`
+  patterns missed plural forms (word-boundary bug: no boundary between "seizure" and a trailing
+  "s"). Also two non-blocking recommendations: a "sudden onset severe headache" phrasing gap, and
+  `.{0,N}` gaps that couldn't span a line break (`.` doesn't match `\n`). **All four fixed same
+  session** — regex changes plus 5 new regression tests (14 total in `red-flags.test.ts`, up from
+  9) — and added a code comment documenting the deliberate no-negation-detection design choice
+  (over-flag, not under-flag, is the correct failure mode for an advisory safety net).
+- Evaluator also surfaced a **separate, pre-existing bug** while adversarially testing under
+  network latency — see "Known gap" above. Not fixed in this sprint; tracked for its own
+  sprint-contract since it's core Tier 0/1 save-path logic, not Tier 2 scope.
+- `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 82/82. `pnpm --filter @scribe/ai
+  run test` → 27/27 (was 22, now +5 regression tests).
+- **Next:** per user's explicit "continue to finish everything," proceeding to the next Tier 2
+  pioneer item (`pioneer.writing_style` or `pioneer.bulk_pdf`) using the same sprint-contract-first
+  workflow.
+
+---
 
 ### 2026-08-17 — pioneer.version_diff (PASS) — first Tier 2 feature
 - Entirely frontend, zero backend changes — `note.version_history`'s existing endpoint already

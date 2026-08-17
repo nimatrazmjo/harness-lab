@@ -34,10 +34,15 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 - **Tier 1: COMPLETE — 16/16 passing.** Every item independently evaluated PASS or an accepted
   CONDITIONAL, and every CONDITIONAL was closed same-session before being marked done. No
   outstanding debt.
-- **Tier 2: 1/4 passing** — `pioneer.version_diff` done (entirely frontend, hand-rolled LCS diff
+- **Tier 2: 2/4 passing** — `pioneer.version_diff` done (entirely frontend, hand-rolled LCS diff
   in `apps/web/src/features/note/diff.ts`, `VersionDiff.tsx`, compare dropdowns in
   `EncounterWorkspacePage`). Independently evaluated 7/7 PASS, including the evaluator writing its
   own adversarial test cases against the diff algorithm (not just trusting the existing suite).
+  `pioneer.red_flags` also done (`libs/ai/src/red-flags.ts` — 11 deterministic regex patterns, no
+  LLM call; `GET /encounters/:id/red-flags`, tenant-scoped; advisory banner in
+  `EncounterWorkspacePage`, Generate button never gated on flags). Independently evaluated
+  CONDITIONAL — 2 required + 2 non-blocking pattern gaps found, **all 4 fixed same session** (see
+  "Known gaps" below for the one thing the evaluator found that was NOT fixed this sprint).
   Per `docs/PRODUCT.md`: Tier 2 is "one or two, done well," not a checklist — remaining items are
   being attempted per an explicit "continue to finish everything" instruction from the user this
   session, not because they're required.
@@ -55,6 +60,10 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   deactivate, template create/update/delete) logs to `audit_logs`, queryable via
   `GET /admin/audit-logs` (admin-only, filterable by actor/action/date-range). Verified no
   password or PHI ever reaches the `metadata` column.
+- **Red-flag detection exists**: `detectRedFlags()` in `libs/ai/src/red-flags.ts` is a pure,
+  deterministic regex scanner (11 patterns) — fully decoupled from generation, never touches
+  `ScribeService`/`MockModelClient`. `GET /encounters/:id/red-flags` is tenant-scoped like every
+  other encounter route. Frontend shows an advisory banner; Generate stays clickable regardless.
 
 ## Environment (must-know before touching anything)
 
@@ -73,7 +82,7 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 - To start Postgres: `docker compose -f infra/docker-compose.yml up -d`, then
   `pnpm --filter api run db:migrate && pnpm --filter api run db:seed && pnpm --filter api run icd10:embed`.
 - Full check: `pnpm run verify` — exits 0 as of this session. `pnpm --filter api run test:e2e` runs
-  77 tests; `pnpm --filter web run test` runs 21; `pnpm --filter @scribe/ai run test` runs 13.
+  82 tests; `pnpm --filter web run test` runs 30; `pnpm --filter @scribe/ai run test` runs 27.
 - Demo logins: `dr.chen@clinic.dev` / `provider-pass-1` (+ 2 more), `admin@clinic.dev` /
   `admin-pass-1`. Dev DB accumulates throwaway `test-<uuid>@example.dev` accounts from e2e runs
   (400+ by now) — harmless, or wipe with `docker compose -f infra/docker-compose.yml down -v` +
@@ -108,20 +117,42 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   human with account access; everything code/config-side is ready in `infra/DEPLOY.md`).
 - No Playwright web e2e — only Vitest component tests for the web app.
 - No admin frontend UI (backend-only, by design — no acceptance test requires it).
-- Tier 2 (pioneer): version diff, writing-style learning, red-flag flagging, bulk PDF export — all
-  unstarted, not urgent per product doc.
+- Tier 2 (pioneer): `writing_style` and `bulk_pdf` unstarted — `version_diff` and `red_flags` are
+  now done. Not urgent per product doc; being attempted anyway per explicit user instruction.
 - No rate limiting / no CSRF concern beyond JWT bearer auth (SPA + bearer token, no cookies).
+- **Cross-cycle transcript-autosave race (found by the `red_flags` evaluator, NOT fixed yet)**:
+  in `EncounterWorkspacePage.onTranscriptChange`, under elevated network latency an older
+  `updateInput` PATCH can resolve *after* a newer one, leaving RDS with a stale transcript — which
+  then also stales the red-flags banner and the Subjective section of the next generated note.
+  This is a pre-existing Tier 0/1 bug (this sprint's own fix — awaiting `updateInput` before
+  re-scanning flags within one cycle — is correct and doesn't cause it). Needs its own
+  sprint-contract before being touched; likely fix shape is a monotonic request-sequence guard
+  (ignore a PATCH/GET response if a newer request for the same encounter has already started),
+  not a debounce-interval change.
 
 ## Next feature to work
 
-Tier 1 is done. Two honest options, not a mandate to do either:
-1. **A Tier 2 pioneer feature** — `pioneer.version_diff` is cheapest (immutable `note_versions`
-   already exist; it's a read-only diff between two versions, likely mostly frontend). Per
-   `docs/PRODUCT.md`: pick one or two, done well — this is optional polish, not required scope.
-2. **infra.rds_postgres_private / infra.ec2_nginx_tls** — only actionable if the user provides
-   real AWS account access; cannot be done by an agent unattended (see `infra/DEPLOY.md`).
+Per the user's explicit "continue to finish everything" instruction, proceed to the next Tier 2
+pioneer item without stopping to ask first — same sprint-contract-first workflow each time:
+1. **`pioneer.writing_style`** — hardest of the two: "adapts to how a specific provider tends to
+   phrase notes... based on their history." With `MockModelClient` fully deterministic and
+   template-driven (no actual language model), demonstrating genuine adaptation needs a concrete,
+   defensible mechanism — e.g. extracting phrasing features (sentence length, common openers,
+   terminology preferences) from a provider's saved `note_versions` and feeding them into the mock
+   generation as a new context input, analogous to how `templateApplied` already works. Decide
+   the exact mechanism in `sprint-contract.md` BEFORE coding — this is the one most likely to
+   invite scope-creep or a hand-wavy "fake it" implementation; be concrete and testable.
+2. **`pioneer.bulk_pdf`** — needs a new dependency (a PDF-generation library — check what's
+   already permitted before adding one; this repo has otherwise stayed dependency-light). Export
+   must respect tenant isolation (only the encounters' own provider or admin) and log to
+   `audit_logs` like every other data-export-shaped action.
 
-If picking up either: **before writing any code**, overwrite `sprint-contract.md`'s Active sprint
-section. **After the code is green:** launch a fresh evaluator subagent (repo path, branch name,
-an unused scratch port, explicit instruction to reproduce claims live rather than trust them).
-**If it flags anything, even non-blocking, close what's cheap to close same-session.**
+Also worth surfacing to the user once "continue to finish everything" is done: the tracked
+autosave race above deserves its own sprint before more Tier 2 work compounds on top of it.
+
+**Before writing any code for either:** overwrite `sprint-contract.md`'s Active sprint section
+fresh. **After the code is green:** launch a fresh evaluator subagent (repo path, branch name, an
+unused scratch port, explicit instruction to reproduce claims live rather than trust them). **If
+it flags anything, even non-blocking, close what's cheap to close same-session** — pattern held
+for both `version_diff` (clean PASS, nothing to close) and `red_flags` (CONDITIONAL, both required
+fixes + both non-blocking recommendations closed same session).

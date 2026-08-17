@@ -17,68 +17,82 @@ goalposts or drift into adjacent work — the two most common ways an agent fake
 
 ## Active sprint
 
-**Feature(s):** `pioneer.version_diff` (Tier 2 — first pioneer feature)
-**Goal (one sentence):** A provider can pick any two saved versions of a note and see a
-line-level highlighted diff per SOAP section (plus ICD-10 code additions/removals), entirely from
-data that already exists — no new backend endpoint, no schema change.
-**Tier:** 2 · **Branch:** `feat/version-diff`
+**Feature(s):** `pioneer.red_flags` (Tier 2 — second pioneer feature)
+**Goal (one sentence):** Before generating a note, a provider sees a clearly advisory (never
+blocking) list of clinical red-flag terms detected in the transcript, computed deterministically
+server-side — no AI model call, no fabrication risk.
+**Tier:** 2 · **Branch:** `feat/red-flags`
 
 ### In scope (only these)
 
-- A pure diff utility (`apps/web/src/features/note/diff.ts`) — LCS-based line diff, no external
-  dependency (consistent with the rest of the frontend, which has none beyond
-  react/react-dom/react-router)
-- `VersionDiff.tsx` component rendering the diff for two `NoteVersion` objects: each SOAP section
-  line-by-line (added/removed/unchanged), plus a simple set-diff on `icd10Codes`
-- Wiring into `EncounterWorkspacePage`/`VersionHistory`: a way to pick two versions and view the
-  diff — extends the existing version list rather than a new page
-- `apps/web/src/features/note/__tests__/diff.test.tsx` — the exact path `feature-list.json` names
+- `libs/ai/src/red-flags.ts` — a pure, deterministic keyword/phrase detector (same style as the
+  existing `safety.ts`'s `hasClinicalContent`): scans transcript text for a curated set of
+  clinically meaningful red-flag terms (chest pain radiating to arm/jaw, sudden severe/"worst"
+  headache, loss of consciousness, suicidal/homicidal ideation, signs of stroke, anaphylaxis,
+  severe bleeding, difficulty breathing, seizure, overdose) and returns matched flags with a
+  human-readable message — no LLM call, so no risk of a hallucinated flag
+- Backend: `GET /encounters/:id/red-flags` — tenant-scoped like every other encounter route,
+  reads the encounter's current transcript, runs the detector, returns matches
+- **Frontend wiring in scope** even though only a backend test path is listed — "surfaced to the
+  provider before generation" is inherently frontend-observable, same reasoning as the draft-
+  persistence sprint. Flags render as a clearly-advisory banner above the Generate button; the
+  button itself is never disabled or blocked by a flag being present
+- `apps/api/test/red-flags.e2e-spec.ts`
 
 ### Explicitly OUT of scope (do not touch this sprint)
 
-- Any backend change — `note.version_history`'s existing `GET /encounters/:id/notes` already
-  returns every version's full content; this sprint reads what's already there
-- Any other Tier 2 pioneer feature (writing-style learning, red-flag flagging, bulk PDF export)
-- A dedicated diff-only page/route — this lives inside the existing workspace
+- Any change to the generation pipeline itself (`ScribeService`, `MockModelClient`) — red flags
+  are informational only, computed independently of and before generation, never injected into
+  the prompt or altering output
+- Blocking or gating "Generate note" on flags being reviewed/dismissed — acceptance explicitly
+  requires advisory-only
+- Any other Tier 2 pioneer feature
 
 ### Done conditions (testable — from feature-list.json acceptance, expanded)
 
-- [ ] Given two versions with a changed Plan section, the diff highlights the specific added and
-      removed lines, not just "the section changed" — test: `diff.test.tsx`
-- [ ] Unchanged sections/lines render as unchanged, not as spurious add+remove pairs (a real LCS
-      diff, not a naive full-replace) — test: `diff.test.tsx`
-- [ ] ICD-10 codes added between versions are visually distinguished from codes removed and codes
-      present in both — test: `diff.test.tsx`
-- [ ] A provider can select any two versions from the existing version history and see the diff
-      rendered — test: `diff.test.tsx` (component-level; the selection UI itself)
-- [ ] Comparing a version to itself shows no changes (sanity check on the diff algorithm) — test:
-      `diff.test.tsx`
+- [ ] A transcript containing a red-flag phrase (e.g. "worst headache of my life") returns that
+      flag from `GET /encounters/:id/red-flags` — test: `red-flags.e2e-spec.ts`
+- [ ] A transcript with no red-flag content returns an empty list, not a false positive — test:
+      `red-flags.e2e-spec.ts`
+- [ ] Multiple distinct red flags in one transcript are all returned, not just the first match —
+      test: `red-flags.e2e-spec.ts`
+- [ ] The endpoint is tenant-scoped — another provider gets 403 — test: `red-flags.e2e-spec.ts`
+- [ ] Detected flags are never sent to or used by the generation pipeline — code-review check:
+      `ScribeService`/`MockModelClient` remain untouched by this diff
+- [ ] Flags render in the UI as advisory, and "Generate note" remains clickable regardless —
+      manual browser verification, since no frontend test path is required
 
 ### Invariants that must still hold (AGENTS.md §2)
 
-- [ ] VERSION-IMMUTABILITY — this feature only ever reads `note_versions`, never writes to it;
-      no risk here since it's frontend-only, but worth stating since it's adjacent to the
-      invariant's data
+- [ ] CLINICAL-SAFETY — flags are advisory, human-in-the-loop; never auto-fabricate or auto-act
+- [ ] TENANT-ISOLATION — same gate as every other encounter-scoped route
+- [ ] CONTEXT-INJECTION — irrelevant here (this feature adds no new AI-model call), but worth
+      stating explicitly: red-flag detection must stay a pure deterministic function, not become a
+      second model call that could itself fabricate a flag
 
 ### Verification plan (how each condition is proven)
 
-- `apps/web/src/features/note/__tests__/diff.test.tsx` — both the diff utility's correctness
-  (unit-level assertions on `diffLines`) and the component's rendering (RTL)
-- `pnpm run verify` green; `pnpm --filter web run test` green (existing 21 + new)
-- Manual browser walkthrough: save two versions of a real note with a deliberate edit, select
-  both, confirm the highlighted diff matches the actual edit
+- `apps/api/test/red-flags.e2e-spec.ts`
+- `libs/ai/src/__tests__/red-flags.test.ts` — unit coverage on the detector itself (true positive,
+  true negative, multiple matches, case-insensitivity)
+- Manual browser walkthrough: type a red-flag transcript, confirm the advisory banner appears and
+  Generate note stays enabled
+- `pnpm run verify` green; `pnpm --filter api run test:e2e` + `pnpm --filter @scribe/ai run test`
+  all green
 
 ### Definition of done
 
-- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced a real
-      line-level diff live in a browser (exact removed/added Plan lines, unchanged sections
-      tagged), plus wrote its own adversarial test cases against the LCS algorithm (disjoint
-      text, empty inputs, repeated-line patterns, single-char changes, whitespace) all producing
-      correct/coherent output
-- [x] `pnpm verify` green (30/30 web tests); _Leave clean_ gate passed
-- [x] `evaluator-rubric.md` scored — 7/7 PASS, no CONDITIONALs, no required fixes. One documented
-      edge case noted (not a bug): `diffIcd10Codes` keys purely by code, so a code appearing in
-      both versions with a changed description silently shows the new description as
-      "unchanged" — this matches the contract's own stated caveat that codes are canonical in
-      real data, so descriptions never actually change independently of the code
-- [x] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated
+- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced flag
+      detection, tenant isolation, and the "advisory not blocking" UI behavior live, then wrote
+      its own adversarial pattern-matching test cases against `detectRedFlags`
+- [x] `pnpm verify` green (82/82 API e2e, 27/27 `libs/ai` unit); _Leave clean_ gate passed
+- [x] `evaluator-rubric.md` scored — **Overall: CONDITIONAL**, not a clean PASS. Two required
+      fixes: `difficulty-breathing` didn't match its own literal phrase; `seizure`/`convulsion`
+      patterns missed plural forms. **Both closed same session** (regex fixes + 5 new regression
+      tests). Also fixed the two non-blocking recommendations (multiline gap matching; documented
+      the deliberate no-negation-detection design choice).
+- [x] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated. **A separate,
+      pre-existing bug the evaluator found while testing this sprint (a cross-cycle autosave race
+      in `EncounterWorkspacePage`'s transcript-save debounce, present since Tier 0, NOT introduced
+      by this sprint) is tracked as its own follow-up in `progress.md` — it touches core Tier 0/1
+      code and deserves its own contract, not a drive-by fix bundled into a Tier 2 pioneer sprint.**
