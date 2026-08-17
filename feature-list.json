@@ -554,7 +554,7 @@
       "id": "session.draft_persist",
       "tier": 1,
       "title": "Draft persistence across refresh",
-      "status": "failing",
+      "status": "passing",
       "description": "A mid-encounter draft (transcript entered, note not yet saved) is restored from the database after a refresh or browser close/reopen.",
       "acceptance": [
         "In-progress draft state is written to RDS as it changes.",
@@ -572,7 +572,7 @@
       "id": "session.cross_device",
       "tier": 1,
       "title": "Cross-device draft restore",
-      "status": "failing",
+      "status": "passing",
       "description": "Logging in from a different browser/device restores the same in-progress draft state.",
       "acceptance": [
         "Draft state is keyed to the provider + encounter in RDS, not to the browser.",
@@ -609,7 +609,7 @@
       "id": "edge.session_expired_save",
       "tier": 1,
       "title": "Non-happy-path: save with expired session",
-      "status": "failing",
+      "status": "passing",
       "description": "A provider attempting to save while their session has expired is handled without data loss.",
       "acceptance": [
         "An expired-session save does not lose the provider's work.",

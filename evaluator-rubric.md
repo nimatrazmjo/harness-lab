@@ -61,25 +61,25 @@ model choice, schema, streaming approach, VPC/secrets. If it can't be explained,
 _Prior sprints' scorecards are preserved in git history (search commit messages for
 "docs: record evaluator pass"). This section holds the latest sprint only._
 
-**Sprint:** `admin.view_all, admin.roster, admin.templates_crud, admin.template_select,
-admin.template_live_update` · **Overall: PASS** (1 dimension CONDITIONAL, non-blocking)
+**Sprint:** `session.draft_persist, session.cross_device, edge.session_expired_save` ·
+**Overall: PASS** (7/7 dimensions, no CONDITIONALs)
 
 Evaluated 2026-08-17 by a fresh subagent with no authorship context. Diffed scope: new
-`admin.service.ts`/`admin.mapper.ts`, admin CRUD routes added to `AdminController`, mixed
-public/admin-guard routes added to `TemplatesController`, a `templateApplied` field threaded
-through `libs/ai` so the mock model is genuinely template-aware, 5 new e2e test files, 3 new
-`libs/ai` unit tests. Zero `apps/web` files touched (no admin UI — out of scope per the contract,
-since every acceptance test for this cluster is backend-only).
+`apps/api/src/drafts/{repository,service,controller,module}.ts`, small call-site diffs in
+`notes.module.ts`/`notes.service.ts` (delete draft on real save) and `app.module.ts`, 3 new e2e
+files, plus frontend wiring in `EncounterWorkspacePage.tsx` (restore-on-mount, debounced
+autosave-on-edit, guarded against firing mid-SSE-stream) and the corresponding `api/client.ts`
+(`put`) / `api/encounters.ts` additions.
 
-| #   | Dimension             | Verdict     | Evidence / why |
-| --- | ---------------------- | ----------- | -------------- |
-| 1   | Contract fulfillment  | PASS        | All 8 Done conditions reproduced live or via direct test read: view-all spans providers + filters correctly; roster create/deactivate/list (live: create returns 201 with no password field, immediate login works); non-admin blocked on all 7 admin-gated routes (live: every one 403); template CRUD persists/404s correctly (live: 409 on dup email, 404 on missing template); output visibly differs by template (live: distinct Plan text per template, smuggled fake template ignored); live update takes effect with no caching bug (live: 4 sequential edits, each generation reflected the latest instantly). |
-| 2   | Correctness           | PASS        | Full live curl session against the compiled API, independent of the test suite, reproducing every claim above by hand. |
-| 3   | Invariants (§2)       | PASS        | TENANT-ISOLATION: admin bypass exclusively via `@Roles('admin')`; `RolesGuard` correctly mixes open-GET/admin-write on the same `TemplatesController`, verified live. SECRETS: provider creation hashes via `AuthService.hashPassword`, response DTO has no password field — confirmed empirically in the raw JSON. CONTEXT-INJECTION: template still loaded server-side only, no `@Body()` path to smuggle one client-side. |
-| 4   | Verification quality  | PASS        | Tests assert real content, not shape-only: `template-apply.e2e-spec.ts` checks Plan differs between templates AND contains each template's specific instruction text AND excludes a smuggled fake name; `admin-roster.e2e-spec.ts` proves deactivation invalidates the *same already-issued* JWT, not merely blocking a fresh login. |
-| 5   | No regressions        | PASS        | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 60/60 (40 prior + 20 new). `pnpm --filter @scribe/ai run test` → 13/13 (10 prior + 3 new). |
-| 6   | Scope discipline      | PASS        | `git diff --stat -- apps/web` empty — confirmed zero frontend files touched. No new migration (repositories were already built in Tier 0, unused until now). |
-| 7   | Explainability        | CONDITIONAL | The mock's `templateApplied` string-concatenation (making an otherwise-inert mock observably template-aware) is honestly scoped and JSDoc'd as mock-only; `BedrockModelClient` never touches it (verified by grep — a real LLM would incorporate template guidance through genuine language understanding of `templateInstructions`, not string concatenation). Non-blocking residual risk: a future reader skimming only `mock-provider.ts` without the JSDoc could over-infer real generation works this way. No action required beyond the existing comments. |
+| #   | Dimension             | Verdict | Evidence / why |
+| --- | ---------------------- | ------- | -------------- |
+| 1   | Contract fulfillment  | PASS    | All 7 Done conditions reproduced live, independent of the test suite: PUT/GET round-trip matched the raw `drafts` row byte-for-byte; fresh encounter returns `{note:null,updatedAt:null}`; two independent logins for the same provider (zero shared client state) saw the identical draft, and an edit from one was visible from the other on next fetch; a non-owning provider got 403 on both GET and PUT; a real save deleted the `drafts` row while leaving exactly one `note_versions` row; a garbage-token save attempt got 401, wrote zero versions, left the draft untouched, and a fresh login completed the save with matching content. |
+| 2   | Correctness           | PASS    | Live curl + direct `psql` queries against the real Postgres instance, not inferred from tests. The frontend browser-reload claim itself was outside what the evaluator could re-run, but it traced the mechanism the claim depends on (`getDraft` on mount, debounced `saveDraft` guarded by the `generating` flag for the full SSE stream duration) and confirmed it's real, not aspirational. |
+| 3   | Invariants (§2)       | PASS    | TENANT-ISOLATION: every draft call gated through `EncountersService.getForUser`, same pattern as the rest of the encounter surface. VERSION-IMMUTABILITY: draft deletion happens strictly after the `note_versions` INSERT, never touches it. Checked an adjacent risk not in the contract: a deactivated provider's draft rows stay fully intact (no cascade-delete), consistent with the prior sprint's data-preservation guarantee extending correctly to this new table. |
+| 4   | Verification quality  | PASS    | Tests assert real content via direct DB queries, not just API response shape; `edge-expired-save.e2e-spec.ts` proves zero data loss end-to-end (failed save → 0 versions → intact draft → fresh login → completed save with matching content), not a shortcut assertion. |
+| 5   | No regressions        | PASS    | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 69/69 (60 prior + 9 new), exact match. |
+| 6   | Scope discipline      | PASS    | Diff limited to drafts wiring + minimal necessary call sites; no migration added (table pre-existed unused since Tier 0); no `audit.trail` or unrelated changes. |
+| 7   | Explainability        | PASS    | Upsert-on-`encounter_id UNIQUE` is the correct primitive for one mutable draft row; the debounce-vs-SSE-streaming interaction was traced and confirmed correct, not just asserted. |
 
 **Required fixes before closing:** none.
 

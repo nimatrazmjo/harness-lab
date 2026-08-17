@@ -14,15 +14,15 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** Tier 0 core loop + 3 Tier 1 sprints (patient-context, ICD-10 widget, admin
-  dashboard) all code-complete, verified, and independently evaluated PASS.
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 12 / 16 passing (`edge.no_clinical_content`, `patient.match`, `context.history_injection`, `context.behavior_differs`, `icd10.vector_search`, `icd10.search_widget`, `icd10.append_assessment`, `admin.view_all`, `admin.roster`, `admin.templates_crud`, `admin.template_select`, `admin.template_live_update`)   ·   **Tier 2:** 0 / 4 passing
+- **Active phase:** Tier 0 core loop + 4 Tier 1 sprints (patient-context, ICD-10 widget, admin
+  dashboard, draft persistence) all code-complete, verified, and independently evaluated PASS.
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 15 / 16 passing (only `audit.trail` remains)   ·   **Tier 2:** 0 / 4 passing
 - **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
   (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
   ideally by a fresh subagent) are part of the session protocol — see AGENTS.md §1/§5/§11.
-- **Next feature:** overwrite `sprint-contract.md` for the next sprint first — `session.draft_persist`/
-  `session.cross_device` (net-new, `drafts` table unused so far), `audit.trail` (logging exists,
-  needs admin-action coverage + a query endpoint), or `edge.session_expired_save`.
+- **Next feature:** `audit.trail` — the last Tier 1 item. `AuditService.log()` exists and is
+  called on note save; needs it called from admin actions too, plus a query endpoint
+  (`AuditService.listAll()` exists but isn't exposed via a controller).
 - **Environment:** local bootstrap via `pnpm setup` (`tools/init.sh` → docker-compose Postgres+pgvector on host port **5433** — 5432 is occupied by an unrelated older project on this machine, `~/workstation/ai-clinical-scribe`, don't touch it). `AI_PROVIDER=mock` by default (deterministic, no network calls) — real Bedrock wiring exists in `libs/ai/src/bedrock-provider.ts` but is untested (no AWS creds in this environment).
 - **Open decisions:** none outstanding — raw `pg` + `node-pg-migrate` (not an ORM), zod validation via a custom `ZodValidationPipe`, plain CSS (no UI framework).
 - **Blockers:** `infra.rds_postgres_private` and `infra.ec2_nginx_tls` require an actual AWS account/credentials to provision EC2 + RDS — cannot be done by an agent unattended (see `infra/DEPLOY.md`). Everything code/config-side for both (migrations, nginx.conf, IAM notes, TLS verify script) is ready; only the real cloud provisioning step is outstanding.
@@ -30,6 +30,40 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — session.draft_persist / session.cross_device / edge.session_expired_save (PASS)
+- Net-new work (the `drafts` table existed in the schema since Tier 0 but was never read/written).
+  `DraftsRepository`/`Service`/`Controller`/`Module` upsert a single mutable row per encounter
+  (`UNIQUE(encounter_id)`), `PUT`/`GET /encounters/:id/draft`, gated through the same
+  `EncountersService.getForUser` tenant check as everything else encounter-scoped.
+  `NotesService.save()` now deletes the draft row after a real save — the work is captured as an
+  immutable version, the ephemeral copy is redundant.
+- **Frontend wiring was in scope even though no dedicated frontend test path is listed** — the
+  acceptance criteria ("the provider resumes exactly where they left off") is inherently
+  frontend-observable; a backend-only implementation would pass its own tests while leaving the
+  actual product unchanged. `EncounterWorkspacePage` now restores the draft on mount and
+  debounce-saves on every note change, guarded against firing mid-SSE-stream.
+- Manually verified live in a browser (not just inferred from tests): generated a note, edited
+  the Plan with a distinctive marker, did NOT click Save, confirmed the marker landed in Postgres
+  via direct SQL, then did an actual page navigation (not a React state check) — the edited note
+  reappeared exactly as left. Clicked Save, confirmed the draft row was deleted from Postgres
+  afterward.
+- `edge.session_expired_save`'s "no data loss" claim is proven without waiting for real 8h JWT
+  expiry: a garbage/invalid token on the save attempt gets 401, writes zero `note_versions` rows,
+  and leaves the draft (persisted continuously, well before the failed attempt) completely intact
+  — a fresh login retrieves the identical draft and completes the save.
+- `session.cross_device` proven via two independent logins for the same provider (zero shared
+  client state) both seeing the identical draft; caught and fixed a test bug of my own along the
+  way — asserting two JWTs from logins in the same second would be *byte-different* is wrong
+  (JWTs are deterministic for identical claims+iat), the assertion should be on data identity via
+  RDS, not token string comparison.
+- Independent evaluator: **7/7 PASS**, no CONDITIONALs, no required fixes — also checked an
+  adjacent risk not in the contract (deactivated provider's draft rows stay intact, no
+  cascade-delete) and confirmed it holds.
+- `pnpm --filter api run test:e2e` now 69/69 (was 60).
+- **Next:** `audit.trail` — the last Tier 1 item — write `sprint-contract.md` first.
+
+---
 
 ### 2026-08-17 — admin.view_all / admin.roster / admin.templates_crud / admin.template_select / admin.template_live_update (PASS)
 - Unlike the two prior Tier 1 sprints, this one required real new backend logic, not just tests:
