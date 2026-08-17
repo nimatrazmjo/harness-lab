@@ -17,87 +17,73 @@ goalposts or drift into adjacent work — the two most common ways an agent fake
 
 ## Active sprint
 
-**Feature(s):** `session.draft_persist`, `session.cross_device`, `edge.session_expired_save`
-**Goal (one sentence):** A provider's in-progress (generated but not yet saved) note survives a
-refresh, a browser close/reopen, or logging in from a different device — because it's persisted
-to RDS continuously, not held only in React state — and a session that expires mid-save loses no
-work.
-**Tier:** 1 · **Branch:** `feat/draft-persistence`
+**Feature(s):** `audit.trail` (the last open Tier 1 item)
+**Goal (one sentence):** Every note save and every admin action (provider create/deactivate,
+template create/edit/delete) writes an audit row with actor, action, target, and timestamp to
+RDS, queryable by an admin.
+**Tier:** 1 · **Branch:** `feat/audit-trail`
 
 ### In scope (only these)
 
-- `drafts` table (already exists in the schema, unused until now — `encounter_id UNIQUE`,
-  `provider_id`, `transcript`, `note_draft jsonb`, `updated_at`)
-- Backend: `DraftsRepository` (upsert/find/delete by encounter), `PUT /encounters/:id/draft`,
-  `GET /encounters/:id/draft`, tenant-scoped the same way every other encounter-scoped route is
-- Clearing the draft row when a real save happens (`POST /encounters/:id/notes`) — once work is
-  captured as an immutable `note_versions` row, the ephemeral draft copy is redundant and stale
-- **Frontend wiring in `EncounterWorkspacePage`** (restore draft on mount, debounce-save on every
-  note change) — **unlike the admin.\* sprint, this is explicitly in scope even though no
-  dedicated frontend test path is listed in `feature-list.json`**. The acceptance criteria
-  ("the provider resumes exactly where they left off") is fundamentally a frontend-observable
-  behavior — a backend-only implementation would pass its own e2e tests while leaving the actual
-  product experience unchanged, which the evaluator's own "correctness by hand" dimension would
-  (rightly) catch. A live browser walkthrough proving an actual page reload restores the note is
-  part of this sprint's verification plan, not optional polish.
-- `edge.session_expired_save`'s "no data loss on expired-session save": since draft content is
-  persisted continuously (debounced, same mechanism as above) rather than only at save time, an
-  expired-session save attempt failing with 401 does not lose anything — the draft is already in
-  RDS. Tested via a simulated-expired-token save attempt (real 8h JWT expiry isn't waitable in a
-  test), confirming the draft survives and a re-authenticated request can complete the save with
-  identical content.
+- `AuditService.log()` already exists and is already called from `NotesService.save()` (Tier 0) —
+  that half of the acceptance is done, verify it's still true, don't re-build it
+- Call `audit.log()` from the admin actions that don't yet: `AdminService.createProvider`,
+  `AdminService.deactivateProvider`, and `TemplatesController`'s create/update/delete routes
+- `AuditService.listAll()` exists but isn't exposed via any controller — add
+  `GET /admin/audit-logs` (admin-only, same `@Roles('admin')` gate as the rest of
+  `AdminController`), filterable the same way `admin.view_all` is (actor, action, date range)
+  since "queryable" is explicit in the acceptance text
+- `libs/shared-types`: `AuditLog`/`AuditLogFilter` schemas
 
 ### Explicitly OUT of scope (do not touch this sprint)
 
-- Any silent token-refresh / auto-reauth UX (e.g. a refresh-token flow) — out of scope per
-  AGENTS.md §7's existing JWT model; "the provider is re-authenticated" is satisfied by them
-  logging in again and finding their draft intact, not by the app doing it invisibly
-- `audit.trail` — separate sprint
-- Changing how `encounters.transcript` autosaves (already correct/tested from Tier 0) — this
-  sprint only adds note-draft persistence alongside it
+- Logging every read (GET) action — acceptance only asks for "saves and admin actions" (writes),
+  not a full access log
+- Any frontend admin UI for browsing the audit log (same reasoning as the admin.* sprint — no
+  frontend test path is listed, and unlike draft persistence, "queryable" is satisfiable entirely
+  via an API a human or a future UI can call; there's no equivalent of "the provider resumes where
+  they left off" forcing frontend observability here)
+- Tier 2 pioneer features
 
 ### Done conditions (testable — from feature-list.json acceptance, expanded)
 
-- [ ] Saving a draft note (`PUT /encounters/:id/draft`) persists to RDS, retrievable via
-      `GET /encounters/:id/draft` — test: `draft-persist.e2e-spec.ts`
-- [ ] A fresh `GET /encounters/:id/draft` on an encounter with no draft returns `{ note: null }`,
-      not an error — test: `draft-persist.e2e-spec.ts`
-- [ ] A real browser refresh on the workspace page restores the in-progress note exactly —
-      manual verification (Chrome via MCP), not just an API-level test
-- [ ] Draft is keyed to `(encounter_id, provider_id)` in RDS, not the browser — a second
-      "session" (fresh login token, same provider) sees the identical draft for the same
-      encounter — test: `draft-cross-device.e2e-spec.ts`
-- [ ] Another provider cannot read or write a draft on an encounter they don't own (same tenant
-      gate as every other encounter route) — test: `draft-persist.e2e-spec.ts` or
-      `draft-cross-device.e2e-spec.ts`
-- [ ] Saving the note for real (`POST /encounters/:id/notes`) clears the draft row — test:
-      `draft-persist.e2e-spec.ts`
-- [ ] A save attempt with an invalid/expired token fails cleanly (401) without losing the
-      already-persisted draft; a fresh login retrieves the identical draft and completes the
-      save — test: `edge-expired-save.e2e-spec.ts`
+- [ ] A note save writes an audit row (`actor_id`, `action='note.save'`, `target_type='encounter'`,
+      `target_id`, `created_at`) — already true from Tier 0, re-verify with a fresh test in this
+      sprint's file for completeness
+- [ ] Creating a provider via `POST /admin/providers` writes an audit row
+- [ ] Deactivating a provider via `PATCH /admin/providers/:id/deactivate` writes an audit row
+- [ ] Creating, editing, and deleting a template each write an audit row
+- [ ] `GET /admin/audit-logs` returns rows ordered newest-first, each with actor identity
+      (id + name), action, target, and timestamp
+- [ ] The audit log endpoint is filterable (at minimum by action and date range, mirroring
+      `admin.view_all`'s filter shape)
+- [ ] A non-admin cannot read the audit log
+- [ ] Audit rows are never mutated or deleted by any code path — append-only, same spirit as
+      `note_versions` (not a formal invariant, but worth holding to for a real audit trail)
 
 ### Invariants that must still hold (AGENTS.md §2)
 
-- [ ] TENANT-ISOLATION — draft read/write goes through the same `EncountersService.getForUser`
-      gate as everything else encounter-scoped
-- [ ] PERSISTENCE — drafts live in RDS only, never client-side-only state as the source of truth
-      (React state is a cache of what's in RDS, not the record of truth)
-- [ ] VERSION-IMMUTABILITY — clearing a draft on save must never touch `note_versions`; drafts and
-      versions are different tables with different lifecycles
+- [ ] TENANT-ISOLATION — audit log read is admin-only via the existing `@Roles('admin')` gate
+- [ ] SECRETS — audit `metadata` must never capture a password, token, or transcript/PHI content;
+      only structural facts (version numbers, ids, role changes)
+- [ ] PERSISTENCE — audit rows live in RDS only (already true — `audit_logs` table, no other store)
 
 ### Verification plan (how each condition is proven)
 
-- `apps/api/test/draft-persist.e2e-spec.ts`, `draft-cross-device.e2e-spec.ts`,
-  `edge-expired-save.e2e-spec.ts`
-- Manual browser walkthrough (Chrome via MCP): generate a note, edit it, refresh the page, confirm
-  the edited (not regenerated) note reappears
-- `pnpm run verify` green; `pnpm --filter api run test:e2e` + `pnpm --filter web run test` all green
+- `apps/api/test/audit.e2e-spec.ts` covering all Done conditions above
+- `pnpm run verify` green; `pnpm --filter api run test:e2e` all green (existing 69 + new)
 
 ### Definition of done
 
-- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced the full
-      PUT/GET round-trip, tenant isolation, cross-device identity, draft-clear-on-save, and the
-      expired-session-recovery path all live against a running instance + direct DB queries
-- [x] `pnpm verify` green (69/69 API e2e); _Leave clean_ gate passed
-- [x] `evaluator-rubric.md` scored — 7/7 PASS, no CONDITIONALs, no required fixes
-- [x] `feature-list.json` → `passing` for all three; `progress.md` + `session-handoff.md` updated
+- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced note-save
+      logging, provider create/deactivate logging, template create/update/delete logging (3 rows
+      in order), the audit-log query endpoint (newest-first, actor identity), the action filter,
+      and the non-admin 403 — all live against a running instance + raw psql, plus confirmed no
+      password or PHI ever lands in `metadata`
+- [x] `pnpm verify` green (77/77 API e2e); _Leave clean_ gate passed
+- [x] `evaluator-rubric.md` scored — 6/7 PASS, 1/7 CONDITIONAL (non-blocking, closed same
+      session): the sprint's own verification plan claimed date-range filtering was covered by
+      `audit.e2e-spec.ts` when it wasn't — the evaluator verified it worked correctly live but
+      flagged the missing regression test. Added it.
+- [x] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated. **Tier 1 is
+      now 16/16 — complete.**
