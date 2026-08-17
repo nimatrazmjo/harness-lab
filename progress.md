@@ -14,14 +14,15 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** Tier 0 core loop + 2 Tier 1 sprints (patient-context, ICD-10 widget) all
-  code-complete, verified, and independently evaluated PASS. Ready for the next Tier 1 sprint.
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 7 / 16 passing (`edge.no_clinical_content`, `patient.match`, `context.history_injection`, `context.behavior_differs`, `icd10.vector_search`, `icd10.search_widget`, `icd10.append_assessment`)   ·   **Tier 2:** 0 / 4 passing
+- **Active phase:** Tier 0 core loop + 3 Tier 1 sprints (patient-context, ICD-10 widget, admin
+  dashboard) all code-complete, verified, and independently evaluated PASS.
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 12 / 16 passing (`edge.no_clinical_content`, `patient.match`, `context.history_injection`, `context.behavior_differs`, `icd10.vector_search`, `icd10.search_widget`, `icd10.append_assessment`, `admin.view_all`, `admin.roster`, `admin.templates_crud`, `admin.template_select`, `admin.template_live_update`)   ·   **Tier 2:** 0 / 4 passing
 - **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
   (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
   ideally by a fresh subagent) are part of the session protocol — see AGENTS.md §1/§5/§11.
-- **Next feature:** overwrite `sprint-contract.md` for the next sprint first — the `admin.*`
-  cluster (only a bare `@Roles('admin')` gate exists so far) or `session.draft_persist`.
+- **Next feature:** overwrite `sprint-contract.md` for the next sprint first — `session.draft_persist`/
+  `session.cross_device` (net-new, `drafts` table unused so far), `audit.trail` (logging exists,
+  needs admin-action coverage + a query endpoint), or `edge.session_expired_save`.
 - **Environment:** local bootstrap via `pnpm setup` (`tools/init.sh` → docker-compose Postgres+pgvector on host port **5433** — 5432 is occupied by an unrelated older project on this machine, `~/workstation/ai-clinical-scribe`, don't touch it). `AI_PROVIDER=mock` by default (deterministic, no network calls) — real Bedrock wiring exists in `libs/ai/src/bedrock-provider.ts` but is untested (no AWS creds in this environment).
 - **Open decisions:** none outstanding — raw `pg` + `node-pg-migrate` (not an ORM), zod validation via a custom `ZodValidationPipe`, plain CSS (no UI framework).
 - **Blockers:** `infra.rds_postgres_private` and `infra.ec2_nginx_tls` require an actual AWS account/credentials to provision EC2 + RDS — cannot be done by an agent unattended (see `infra/DEPLOY.md`). Everything code/config-side for both (migrations, nginx.conf, IAM notes, TLS verify script) is ready; only the real cloud provisioning step is outstanding.
@@ -29,6 +30,39 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — admin.view_all / admin.roster / admin.templates_crud / admin.template_select / admin.template_live_update (PASS)
+- Unlike the two prior Tier 1 sprints, this one required real new backend logic, not just tests:
+  `AdminService` (view-all + roster) and admin CRUD routes on `TemplatesController` (mixed with
+  its existing public GET via per-method `@Roles('admin')`, not a separate controller).
+- **Made a real behavior change**: `MockModelClient` previously received `templateInstructions`
+  but never used them — template selection had zero effect on output, so
+  `admin.template_select`'s "output visibly differs by template" wasn't actually true yet. Added
+  `templateApplied` to `GenerateSoapNoteInput` (`libs/ai/src/types.ts`) so the mock can visibly
+  incorporate the *current* template content into the Plan — this is what makes
+  `admin.template_select`/`admin.template_live_update` genuinely testable, not a detour.
+  `BedrockModelClient` doesn't use this field; a real LLM incorporates template guidance through
+  `templateInstructions` (the flattened system-prompt string) via actual language understanding.
+- `admin.roster`'s acceptance references an undefined `edge.provider_deactivated` (dangling
+  reference to a `docs/PRODUCT.md` edge case that never became a tracked feature). Defined and
+  tested it: deactivation never touches a provider's encounter/draft data, and their session ends
+  on their very next authenticated request — proved live that an already-issued, unexpired JWT
+  gets 401'd on the request immediately after deactivation, not just on a fresh login attempt.
+- Added 5 new e2e test files (20 tests) + 3 new `libs/ai` unit tests. Manually verified the full
+  roster lifecycle live via curl (create → login → deactivate → 401 on both the old token and a
+  fresh login) and confirmed a duplicate-email create returns a clean 409, not a raw Postgres
+  stack trace.
+- No admin frontend UI built — every acceptance test for this cluster is backend-only per
+  `feature-list.json`, confirmed via the contract before coding; evaluator independently confirmed
+  zero `apps/web` files touched.
+- Independent evaluator: **6/7 PASS, 1/7 CONDITIONAL** (non-blocking) — flagged only that the
+  mock's template hack could mislead a future reader who skips the JSDoc into thinking real
+  generation works via string concatenation. Already documented, no action needed.
+- `pnpm --filter api run test:e2e` now 60/60 (was 40); `pnpm --filter @scribe/ai run test` now
+  13/13 (was 10).
+- **Next:** `session.draft_persist` or `audit.trail` — write `sprint-contract.md` first.
+
+---
 
 ### 2026-08-17 — icd10.vector_search / icd10.search_widget / icd10.append_assessment (PASS)
 - Backend search already existed from Tier 0 (`GET /icd10/search`) — added dedicated

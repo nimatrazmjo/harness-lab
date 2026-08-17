@@ -61,31 +61,27 @@ model choice, schema, streaming approach, VPC/secrets. If it can't be explained,
 _Prior sprints' scorecards are preserved in git history (search commit messages for
 "docs: record evaluator pass"). This section holds the latest sprint only._
 
-**Sprint:** `icd10.vector_search, icd10.search_widget, icd10.append_assessment` ·
-**Overall: PASS** (1 dimension scored CONDITIONAL, non-blocking, closed same session — see below)
+**Sprint:** `admin.view_all, admin.roster, admin.templates_crud, admin.template_select,
+admin.template_live_update` · **Overall: PASS** (1 dimension CONDITIONAL, non-blocking)
 
-Evaluated 2026-08-17 by a fresh subagent with no authorship context. Diffed scope: 1 new e2e
-file, 1 new frontend API client, 1 new widget component + its 2 test files, a 14-line wiring
-diff in `EncounterWorkspacePage.tsx`, widget-scoped CSS.
+Evaluated 2026-08-17 by a fresh subagent with no authorship context. Diffed scope: new
+`admin.service.ts`/`admin.mapper.ts`, admin CRUD routes added to `AdminController`, mixed
+public/admin-guard routes added to `TemplatesController`, a `templateApplied` field threaded
+through `libs/ai` so the mock model is genuinely template-aware, 5 new e2e test files, 3 new
+`libs/ai` unit tests. Zero `apps/web` files touched (no admin UI — out of scope per the contract,
+since every acceptance test for this cluster is backend-only).
 
 | #   | Dimension             | Verdict     | Evidence / why |
 | --- | ---------------------- | ----------- | -------------- |
-| 1   | Contract fulfillment  | PASS        | All 5 Done conditions reproduced live: search returns ranked code+description+similarity sourced only from `icd10_codes` (SQL-verified against all 234 rows); widget renders results; click appends `{code,description}`; dedup enforced both client-side (disabled button) and in `EncounterWorkspacePage`'s `onAppendIcd10`; save persists whatever `icd10Codes` array it's handed (unchanged `NotesService.save`), confirmed live. |
-| 2   | Correctness           | PASS        | Live curl chain through the actual Vite dev-proxy path (not just the isolated component) using the exact query-string shape `icd10.ts` builds — 200 with real, relevant results (`M54.5` top hit for "low back pain"). |
-| 3   | Invariants (§2)       | PASS        | CLINICAL-SAFETY: search path is 100% DB-backed, zero fabrication (every returned code verified to exist). Auth required (401 without token). SQL-injection-flavored query treated as harmless plain text (parameterized query confirmed safe, row count unchanged). Confirmed the backend does NOT independently re-validate that codes on save came from a real search — but this is unchanged, pre-existing Tier 0 behavior (human-in-the-loop editing already trusts the client's full note payload on save), not a new gap this sprint introduced. |
-| 4   | Verification quality  | PASS        | Limit edge cases (0, -5, 10000, non-numeric, missing) all independently reproduced live, matching `Icd10SearchRequestSchema`'s `z.coerce.number().int().min(1).max(20).default(10)`. e2e test asserts "no code outside `icd10_codes`," not tautological. |
-| 5   | No regressions        | PASS        | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 40/40. `pnpm --filter web run test` → 17/17 at evaluation time (now 21/21 after the follow-up below). |
-| 6   | Scope discipline      | PASS        | Nothing outside the icd10 widget touched — no admin/audit/drafts/embedding-model/dataset changes. |
-| 7   | Explainability        | CONDITIONAL | Flagged that `widget.test.tsx`/`append.test.tsx` inject a mocked `search` prop, so `Icd10SearchWidget`'s actual wiring to `icd10Api.search` was unverified by any automated test — evaluator closed the gap manually via a live proxy request, but that's evaluator-added evidence, not sprint-authored coverage. |
+| 1   | Contract fulfillment  | PASS        | All 8 Done conditions reproduced live or via direct test read: view-all spans providers + filters correctly; roster create/deactivate/list (live: create returns 201 with no password field, immediate login works); non-admin blocked on all 7 admin-gated routes (live: every one 403); template CRUD persists/404s correctly (live: 409 on dup email, 404 on missing template); output visibly differs by template (live: distinct Plan text per template, smuggled fake template ignored); live update takes effect with no caching bug (live: 4 sequential edits, each generation reflected the latest instantly). |
+| 2   | Correctness           | PASS        | Full live curl session against the compiled API, independent of the test suite, reproducing every claim above by hand. |
+| 3   | Invariants (§2)       | PASS        | TENANT-ISOLATION: admin bypass exclusively via `@Roles('admin')`; `RolesGuard` correctly mixes open-GET/admin-write on the same `TemplatesController`, verified live. SECRETS: provider creation hashes via `AuthService.hashPassword`, response DTO has no password field — confirmed empirically in the raw JSON. CONTEXT-INJECTION: template still loaded server-side only, no `@Body()` path to smuggle one client-side. |
+| 4   | Verification quality  | PASS        | Tests assert real content, not shape-only: `template-apply.e2e-spec.ts` checks Plan differs between templates AND contains each template's specific instruction text AND excludes a smuggled fake name; `admin-roster.e2e-spec.ts` proves deactivation invalidates the *same already-issued* JWT, not merely blocking a fresh login. |
+| 5   | No regressions        | PASS        | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 60/60 (40 prior + 20 new). `pnpm --filter @scribe/ai run test` → 13/13 (10 prior + 3 new). |
+| 6   | Scope discipline      | PASS        | `git diff --stat -- apps/web` empty — confirmed zero frontend files touched. No new migration (repositories were already built in Tier 0, unused until now). |
+| 7   | Explainability        | CONDITIONAL | The mock's `templateApplied` string-concatenation (making an otherwise-inert mock observably template-aware) is honestly scoped and JSDoc'd as mock-only; `BedrockModelClient` never touches it (verified by grep — a real LLM would incorporate template guidance through genuine language understanding of `templateInstructions`, not string concatenation). Non-blocking residual risk: a future reader skimming only `mock-provider.ts` without the JSDoc could over-infer real generation works this way. No action required beyond the existing comments. |
 
-**Required fixes before closing:** none blocking. Non-blocking recommendation — add a test
-exercising `icd10Api.search` itself — **closed same session**: added
-`apps/web/src/api/__tests__/icd10.test.ts` (4 tests: URL/query-encoding, default limit, error
-propagation). Writing it surfaced an unrelated, previously-invisible bug: Node 25's experimental
-native `localStorage` global shadows jsdom's in this test environment, so `api/client.ts` and
-`state/auth-context.tsx` had never actually been exercised by any test — `localStorage.setItem`
-silently wasn't a function. Fixed with an in-memory `Storage` polyfill in
-`apps/web/src/test/setup.ts`. Web suite now 21/21.
+**Required fixes before closing:** none.
 
 **Only when Overall is PASS (or an accepted CONDITIONAL):** flip `feature-list.json` → `passing`,
 then update `progress.md` and `session-handoff.md`.

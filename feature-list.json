@@ -461,7 +461,7 @@
       "id": "admin.view_all",
       "tier": 1,
       "title": "Admin: view all encounters (filterable)",
-      "status": "failing",
+      "status": "passing",
       "description": "Admins view all encounters across providers, filterable by provider and date range.",
       "acceptance": [
         "Admin-only view lists all encounters across providers.",
@@ -480,7 +480,7 @@
       "id": "admin.roster",
       "tier": 1,
       "title": "Admin: manage provider roster",
-      "status": "failing",
+      "status": "passing",
       "description": "Admins can add and deactivate provider accounts.",
       "acceptance": [
         "Admin can create a new provider account.",
@@ -499,7 +499,7 @@
       "id": "admin.templates_crud",
       "tier": 1,
       "title": "Admin: template library CRUD",
-      "status": "failing",
+      "status": "passing",
       "description": "Admins create, edit, and delete note templates (structured prompts that shape generation for different encounter types).",
       "acceptance": [
         "Admin can create, edit, and delete templates.",
@@ -517,7 +517,7 @@
       "id": "admin.template_select",
       "tier": 1,
       "title": "Provider selects template; AI behaves differently",
-      "status": "failing",
+      "status": "passing",
       "description": "Providers select a template before generating; the AI visibly behaves differently depending on the active template.",
       "acceptance": [
         "Provider can pick a template before Generate Note.",
@@ -536,7 +536,7 @@
       "id": "admin.template_live_update",
       "tier": 1,
       "title": "Live template updates (no refresh)",
-      "status": "failing",
+      "status": "passing",
       "description": "If an admin updates the active template while a provider has the workspace open, the provider's next generation uses the new template without a page refresh.",
       "acceptance": [
         "Admin edits a template; the provider's next generation uses the new version.",
