@@ -29,6 +29,14 @@ export const UpdateEncounterInputRequestSchema = z.object({
 });
 export type UpdateEncounterInputRequest = z.infer<typeof UpdateEncounterInputRequestSchema>;
 
+/** Admin: filter the cross-provider encounter list (admin.view_all). */
+export const AdminEncounterFilterSchema = z.object({
+  providerId: z.string().uuid().optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD").optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "expected YYYY-MM-DD").optional(),
+});
+export type AdminEncounterFilter = z.infer<typeof AdminEncounterFilterSchema>;
+
 export const PatientSchema = z.object({
   id: z.string().uuid(),
   firstName: z.string(),

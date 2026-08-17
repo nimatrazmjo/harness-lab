@@ -31,3 +31,22 @@ export interface JwtClaims {
   iat: number;
   exp: number;
 }
+
+/** Admin roster management (admin.roster). */
+export const CreateProviderRequestSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  name: z.string().min(1),
+  role: RoleSchema.default("provider"),
+});
+export type CreateProviderRequest = z.infer<typeof CreateProviderRequestSchema>;
+
+export const ProviderSummarySchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  name: z.string(),
+  role: RoleSchema,
+  isActive: z.boolean(),
+  createdAt: z.string().datetime(),
+});
+export type ProviderSummary = z.infer<typeof ProviderSummarySchema>;
