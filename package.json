@@ -8,7 +8,7 @@
   "scripts": {
     "setup": "bash tools/init.sh",
     "build:libs": "pnpm --filter @scribe/shared-types --filter @scribe/ai run build",
-    "dev": "pnpm run build:libs && pnpm --parallel --filter ./apps/* run dev",
+    "dev": "pnpm run build:libs && pnpm --parallel --filter \"./apps/*\" run dev",
     "verify": "pnpm run build:libs && pnpm -r run lint && pnpm -r run typecheck && pnpm -r run test && pnpm -r run build",
     "test:e2e": "pnpm --filter api run test:e2e && pnpm --filter web run test:e2e",
     "db:migrate": "pnpm --filter api run db:migrate",
