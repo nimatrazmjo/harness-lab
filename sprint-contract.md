@@ -70,18 +70,19 @@ save, and if so, apply that abbreviation to their next generated note.**
 
 ### Done conditions (testable — from feature-list.json acceptance, expanded)
 
-- [ ] A provider whose last ≥3 saved notes prefer "pt" over "patient" (by the threshold above)
+- [x] A provider whose last ≥3 saved notes prefer "pt" over "patient" (by the threshold above)
       gets a newly generated note using "Pt" instead of "Patient" — test: `writing-style.e2e-spec.ts`
-- [ ] A provider with no saved history, or whose history doesn't clear the threshold, gets
+- [x] A provider with no saved history, or whose history doesn't clear the threshold, gets
       unchanged output (byte-identical to pre-sprint generation) — test: `writing-style.e2e-spec.ts`
-- [ ] The style profile is computed fresh server-side per generation call from that provider's own
+- [x] The style profile is computed fresh server-side per generation call from that provider's own
       `note_versions` rows — never client-supplied, never cached stale across a session — test:
       `writing-style.e2e-spec.ts` (two generations for the same provider after their history
-      changes produce different output)
-- [ ] `inferWritingStyle` unit-tested directly: below-threshold sample counts stay `"patient"`,
+      changes produce different output). Added after the evaluator flagged this exact test was
+      missing even though the property itself was true (proven live via curl + browser).
+- [x] `inferWritingStyle` unit-tested directly: below-threshold sample counts stay `"patient"`,
       at-threshold flips to `"pt"`, empty sample list stays `"patient"` — test:
       `libs/ai/src/__tests__/writing-style.test.ts`
-- [ ] A provider's style is never influenced by another provider's saved notes — test:
+- [x] A provider's style is never influenced by another provider's saved notes — test:
       `writing-style.e2e-spec.ts` (tenant-isolation-shaped assertion on the profile source)
 
 ### Invariants that must still hold (AGENTS.md §2)
@@ -107,7 +108,17 @@ save, and if so, apply that abbreviation to their next generated note.**
 
 ### Definition of done
 
-- [ ] Every _Done condition_ checked with evidence
-- [ ] `pnpm verify` green; _Leave clean_ gate passed
-- [ ] `evaluator-rubric.md` scored by a separate subagent
-- [ ] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated
+- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced the
+      mechanism live (curl + a genuinely fresh provider, confirmed again independently in a real
+      browser this session), adversarially tested the regex substitution and threshold boundaries
+      itself, and confirmed TENANT-ISOLATION/CONTEXT-INJECTION/CLINICAL-SAFETY all hold
+- [x] `pnpm verify` green (86/86 API e2e, 33/33 `libs/ai` unit); _Leave clean_ gate passed
+- [x] `evaluator-rubric.md` scored — **Overall: CONDITIONAL**, no required fixes (mechanism was
+      correct even before this pass). Two non-blocking recommendations, **both closed same
+      session**: added the same-provider before/after e2e test the contract's own verification
+      plan promised but the suite didn't yet have, and a doc comment on `inferWritingStyle`
+      disclosing that bare "pt" counting can't distinguish "patient" from other clinical uses of
+      "PT" (physical therapy, prothrombin time).
+- [x] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated. The
+      window-stickiness observation (long-lived accounts can dilute a real preference shift) is
+      left as a conscious, undecided product question for a future sprint, not treated as a bug.

@@ -14,17 +14,17 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** Tier 1 complete (16/16). Two Tier 2 pioneer features code-complete, verified,
-  and independently evaluated: `pioneer.version_diff` (PASS) and `pioneer.red_flags`
-  (CONDITIONAL → both required fixes closed same session).
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 16 / 16 passing   ·   **Tier 2:** 2 / 4 passing (`pioneer.version_diff`, `pioneer.red_flags`)
+- **Active phase:** Tier 1 complete (16/16). Three Tier 2 pioneer features code-complete, verified,
+  and independently evaluated: `pioneer.version_diff` (PASS), `pioneer.red_flags` (CONDITIONAL →
+  both required fixes closed same session), `pioneer.writing_style` (CONDITIONAL → no required
+  fixes, both non-blocking recommendations closed same session).
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 16 / 16 passing   ·   **Tier 2:** 3 / 4 passing (`pioneer.version_diff`, `pioneer.red_flags`, `pioneer.writing_style`)
 - **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
   (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
   ideally by a fresh subagent) are part of the session protocol — see AGENTS.md §1/§5/§11.
 - **Next feature:** per `docs/PRODUCT.md`, Tier 2 is "one or two, done well" — not a checklist to
   complete. Continuing anyway per explicit user instruction ("continue to finish everything").
-  Remaining: `pioneer.writing_style` (hard to make genuinely real with the mock model),
-  `pioneer.bulk_pdf` (new PDF-generation dependency).
+  Remaining: `pioneer.bulk_pdf` (new PDF-generation dependency) — the last Tier 2 item.
 - **Known gap (tracked, not yet fixed):** a cross-cycle race in
   `EncounterWorkspacePage`'s transcript-autosave debounce — under elevated network latency, an
   older `updateInput` PATCH resolving after a newer one can leave the DB with a stale transcript,
@@ -40,6 +40,38 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — pioneer.writing_style (CONDITIONAL → closed) — third Tier 2 feature
+- Concrete mechanism decided in `sprint-contract.md` before any code, specifically to avoid a
+  hand-wavy "writing style" implementation: `MockModelClient` has no real generative voice, so
+  "learning" here means detecting whether a provider repeatedly abbreviates "patient" to "pt" in
+  what they actually save (their own edits, not what the mock auto-generates), then applying that
+  preference to their next generated note. Threshold requires a real, repeated pattern (`ptCount
+  >= patientCount + 2 AND ptCount >= 3` across their last 10 saved notes) — a single edit doesn't
+  flip it, and the default (no adaptation) is byte-identical to pre-sprint output.
+- New: `libs/ai/src/writing-style.ts` (`inferWritingStyle`, pure/deterministic), `applyWritingStyle`
+  in `mock-provider.ts` (one-directional "Patient"→"Pt" substitution, word-boundary safe — doesn't
+  touch "Patients", "inpatient", "outpatient", or ICD-10 descriptions), `NotesRepository
+  .getRecentByAuthor` (scoped to `author_id` only), wired into `ScribeService.generate` alongside
+  the existing `templateApplied` pattern.
+- Independent evaluator: **CONDITIONAL**, but **no required fixes** — the mechanism itself was
+  correct before the pass. It found one real gap: the contract's own verification plan promised a
+  same-provider before/after test that the suite didn't actually have (the property was true,
+  proven live via curl and confirmed independently in a real browser this session, but untested).
+  Also flagged that bare "pt" counting can't distinguish "patient" from other clinical uses of
+  "PT" (physical therapy, prothrombin time). **Both closed same session**: added the missing test
+  to `writing-style.e2e-spec.ts`, added a doc comment disclosing the "pt" ambiguity.
+- Adversarially verified by the evaluator itself: regex substitution tested against plurals,
+  compound words, ICD-10 descriptions, threshold boundaries (3-vs-1, 3-vs-2, 4-vs-2) — no false
+  positives or corruption found. One theoretical edge case noted (a literal patient surname
+  "Patient" would get corrupted) — low-severity, not fixed, consistent with this being synthetic
+  demo data throughout the app.
+- `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 86/86 (was 82). `pnpm --filter
+  @scribe/ai run test` → 33/33 (was 27).
+- **Next:** per "continue to finish everything," proceeding to the last Tier 2 item,
+  `pioneer.bulk_pdf`.
+
+---
 
 ### 2026-08-17 — pioneer.red_flags (CONDITIONAL → fixed) — second Tier 2 feature
 - Pure deterministic detector (`libs/ai/src/red-flags.ts`, 11 curated regex patterns: chest pain

@@ -664,7 +664,7 @@
       "id": "pioneer.writing_style",
       "tier": 2,
       "title": "Pioneer: provider writing-style learning",
-      "status": "failing",
+      "status": "passing",
       "description": "The AI adapts to how a specific provider tends to phrase their notes over time, based on their history in the database.",
       "acceptance": [
         "Generation reflects a provider's prior phrasing patterns drawn from their saved notes.",

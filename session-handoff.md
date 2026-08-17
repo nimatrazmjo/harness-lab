@@ -34,7 +34,7 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 - **Tier 1: COMPLETE — 16/16 passing.** Every item independently evaluated PASS or an accepted
   CONDITIONAL, and every CONDITIONAL was closed same-session before being marked done. No
   outstanding debt.
-- **Tier 2: 2/4 passing** — `pioneer.version_diff` done (entirely frontend, hand-rolled LCS diff
+- **Tier 2: 3/4 passing** — `pioneer.version_diff` done (entirely frontend, hand-rolled LCS diff
   in `apps/web/src/features/note/diff.ts`, `VersionDiff.tsx`, compare dropdowns in
   `EncounterWorkspacePage`). Independently evaluated 7/7 PASS, including the evaluator writing its
   own adversarial test cases against the diff algorithm (not just trusting the existing suite).
@@ -43,9 +43,15 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   `EncounterWorkspacePage`, Generate button never gated on flags). Independently evaluated
   CONDITIONAL — 2 required + 2 non-blocking pattern gaps found, **all 4 fixed same session** (see
   "Known gaps" below for the one thing the evaluator found that was NOT fixed this sprint).
+  `pioneer.writing_style` also done (`libs/ai/src/writing-style.ts` — `inferWritingStyle`, a
+  deterministic "patient"→"pt" abbreviation-preference detector learned from a provider's own
+  saved `note_versions`; applied server-side in `MockModelClient` via `applyWritingStyle`).
+  Independently evaluated CONDITIONAL — no required fixes (mechanism was correct pre-pass), 2
+  non-blocking recommendations (a missing before/after e2e test, a doc comment on a known "pt" vs.
+  clinical-PT ambiguity), **both closed same session**.
   Per `docs/PRODUCT.md`: Tier 2 is "one or two, done well," not a checklist — remaining items are
   being attempted per an explicit "continue to finish everything" instruction from the user this
-  session, not because they're required.
+  session, not because they're required. Only `pioneer.bulk_pdf` remains.
 - **TENANT-ISOLATION clarified** (2026-08-17): `AGENTS.md` §2 states a patient's clinical history
   CAN cross providers (continuity of care); direct access to another provider's *encounter
   record* stays 403. Settled.
@@ -64,6 +70,15 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   deterministic regex scanner (11 patterns) — fully decoupled from generation, never touches
   `ScribeService`/`MockModelClient`. `GET /encounters/:id/red-flags` is tenant-scoped like every
   other encounter route. Frontend shows an advisory banner; Generate stays clickable regardless.
+- **Writing-style learning exists**: `inferWritingStyle()` in `libs/ai/src/writing-style.ts`
+  scans a provider's own last 10 saved `note_versions` (`NotesRepository.getRecentByAuthor`,
+  `author_id`-scoped) for a real, repeated "patient"→"pt" abbreviation preference (threshold:
+  `ptCount >= patientCount + 2 AND ptCount >= 3`). `ScribeService.generate` computes this fresh
+  every call and passes it as `writingStyle` on `GenerateSoapNoteInput`, same pattern as
+  `templateApplied`. `MockModelClient.applyWritingStyle` does a one-directional, word-boundary-safe
+  substitution ("Patient"/"patient" → "Pt"/"pt") across all four SOAP sections — no-op unless the
+  profile says "pt", so a provider with no/thin history sees byte-identical output to before this
+  feature existed. No frontend surface (not required by acceptance).
 
 ## Environment (must-know before touching anything)
 
@@ -82,7 +97,7 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 - To start Postgres: `docker compose -f infra/docker-compose.yml up -d`, then
   `pnpm --filter api run db:migrate && pnpm --filter api run db:seed && pnpm --filter api run icd10:embed`.
 - Full check: `pnpm run verify` — exits 0 as of this session. `pnpm --filter api run test:e2e` runs
-  82 tests; `pnpm --filter web run test` runs 30; `pnpm --filter @scribe/ai run test` runs 27.
+  86 tests; `pnpm --filter web run test` runs 30; `pnpm --filter @scribe/ai run test` runs 33.
 - Demo logins: `dr.chen@clinic.dev` / `provider-pass-1` (+ 2 more), `admin@clinic.dev` /
   `admin-pass-1`. Dev DB accumulates throwaway `test-<uuid>@example.dev` accounts from e2e runs
   (400+ by now) — harmless, or wipe with `docker compose -f infra/docker-compose.yml down -v` +
@@ -117,8 +132,12 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   human with account access; everything code/config-side is ready in `infra/DEPLOY.md`).
 - No Playwright web e2e — only Vitest component tests for the web app.
 - No admin frontend UI (backend-only, by design — no acceptance test requires it).
-- Tier 2 (pioneer): `writing_style` and `bulk_pdf` unstarted — `version_diff` and `red_flags` are
-  now done. Not urgent per product doc; being attempted anyway per explicit user instruction.
+- Tier 2 (pioneer): only `bulk_pdf` unstarted — `version_diff`, `red_flags`, and `writing_style`
+  are now done. Not urgent per product doc; being attempted anyway per explicit user instruction.
+- `pioneer.writing_style`'s style window can go "sticky" for long-lived provider accounts (an
+  older majority of saved notes can dilute a real, recent preference shift) — a conscious,
+  undecided product question flagged by the evaluator, not a bug. Worth a decision if this ever
+  becomes real product scope beyond the mock model.
 - No rate limiting / no CSRF concern beyond JWT bearer auth (SPA + bearer token, no cookies).
 - **Cross-cycle transcript-autosave race (found by the `red_flags` evaluator, NOT fixed yet)**:
   in `EncounterWorkspacePage.onTranscriptChange`, under elevated network latency an older
@@ -132,27 +151,31 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 
 ## Next feature to work
 
-Per the user's explicit "continue to finish everything" instruction, proceed to the next Tier 2
-pioneer item without stopping to ask first — same sprint-contract-first workflow each time:
-1. **`pioneer.writing_style`** — hardest of the two: "adapts to how a specific provider tends to
-   phrase notes... based on their history." With `MockModelClient` fully deterministic and
-   template-driven (no actual language model), demonstrating genuine adaptation needs a concrete,
-   defensible mechanism — e.g. extracting phrasing features (sentence length, common openers,
-   terminology preferences) from a provider's saved `note_versions` and feeding them into the mock
-   generation as a new context input, analogous to how `templateApplied` already works. Decide
-   the exact mechanism in `sprint-contract.md` BEFORE coding — this is the one most likely to
-   invite scope-creep or a hand-wavy "fake it" implementation; be concrete and testable.
-2. **`pioneer.bulk_pdf`** — needs a new dependency (a PDF-generation library — check what's
-   already permitted before adding one; this repo has otherwise stayed dependency-light). Export
-   must respect tenant isolation (only the encounters' own provider or admin) and log to
-   `audit_logs` like every other data-export-shaped action.
+Per the user's explicit "continue to finish everything" instruction, proceed to the last Tier 2
+pioneer item, `pioneer.bulk_pdf` — same sprint-contract-first workflow as the prior three:
+
+- **`pioneer.bulk_pdf`** — "Bulk export of all encounters for a given patient across all visits as
+  a single structured PDF." Needs a new dependency (a PDF-generation library — check what's
+  already permitted/installed before adding one; this repo has otherwise stayed dependency-light,
+  no UI framework, hand-rolled diff instead of a library, etc. — pick something small and
+  well-established, e.g. `pdfkit` or `@react-pdf/renderer` are common Node choices, but decide and
+  record the choice in `sprint-contract.md` before installing). Acceptance requires: tenant
+  isolation (only the patient's own provider, or admin — same guard shape as every other
+  encounter-scoped route) and audit logging (this is a data-export action, same category as every
+  other audit-logged admin/write action already in the system). Test file already named in
+  `feature-list.json`: `apps/api/test/bulk-pdf.e2e-spec.ts`.
 
 Also worth surfacing to the user once "continue to finish everything" is done: the tracked
-autosave race above deserves its own sprint before more Tier 2 work compounds on top of it.
+cross-cycle autosave race (see "Known gaps" above, found by the `red_flags` evaluator) deserves
+its own sprint before more work compounds on top of it — it's core Tier 0/1 save-path logic, not
+Tier 2 scope, and hasn't been touched across the last two pioneer sprints.
 
-**Before writing any code for either:** overwrite `sprint-contract.md`'s Active sprint section
-fresh. **After the code is green:** launch a fresh evaluator subagent (repo path, branch name, an
-unused scratch port, explicit instruction to reproduce claims live rather than trust them). **If
-it flags anything, even non-blocking, close what's cheap to close same-session** — pattern held
-for both `version_diff` (clean PASS, nothing to close) and `red_flags` (CONDITIONAL, both required
-fixes + both non-blocking recommendations closed same session).
+**Before writing any code:** overwrite `sprint-contract.md`'s Active sprint section fresh — decide
+the concrete PDF-generation approach and library choice up front, the way `writing_style`'s
+concrete mechanism was decided before coding to avoid hand-waving. **After the code is green:**
+launch a fresh evaluator subagent (repo path, branch name, an unused scratch port, explicit
+instruction to reproduce claims live rather than trust them). **If it flags anything, even
+non-blocking, close what's cheap to close same-session** — pattern held for `version_diff` (clean
+PASS, nothing to close), `red_flags` (CONDITIONAL, both required fixes + both non-blocking
+recommendations closed same session), and `writing_style` (CONDITIONAL, no required fixes, both
+non-blocking recommendations closed same session).
