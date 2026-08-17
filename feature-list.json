@@ -405,7 +405,7 @@
       "id": "icd10.vector_search",
       "tier": 1,
       "title": "pgvector ICD-10 semantic search",
-      "status": "failing",
+      "status": "passing",
       "description": "Semantic search over an embedded subset (200-300+) of ICD-10 codes using pgvector cosine similarity. No external ICD-10 API.",
       "acceptance": [
         "200-300+ ICD-10 codes are embedded and stored in a pgvector column in RDS.",
@@ -425,7 +425,7 @@
       "id": "icd10.search_widget",
       "tier": 1,
       "title": "ICD-10 search widget",
-      "status": "failing",
+      "status": "passing",
       "description": "A standalone ICD-10 search widget in the encounter workspace where a provider types a symptom/condition in plain English.",
       "acceptance": [
         "The widget accepts plain-English input and shows ranked results.",
@@ -443,7 +443,7 @@
       "id": "icd10.append_assessment",
       "tier": 1,
       "title": "Append ICD-10 result to Assessment",
-      "status": "failing",
+      "status": "passing",
       "description": "The provider can click any search result to append it to the Assessment section of the open note.",
       "acceptance": [
         "Clicking a result appends the code + description to the Assessment.",

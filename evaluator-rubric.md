@@ -58,33 +58,34 @@ model choice, schema, streaming approach, VPC/secrets. If it can't be explained,
 
 ## Output (the evaluator fills this in)
 
-_Prior sprint's scorecard (Tier 0 core loop, all PASS) is preserved in git history — see the
-`docs: retroactive sprint-contract...` commit. This section holds the latest sprint only._
+_Prior sprints' scorecards are preserved in git history (search commit messages for
+"docs: record evaluator pass"). This section holds the latest sprint only._
 
-**Sprint:** `patient.match, context.history_injection, context.behavior_differs` ·
-**Overall: PASS** (2 dimensions scored CONDITIONAL, both resolved — see below)
+**Sprint:** `icd10.vector_search, icd10.search_widget, icd10.append_assessment` ·
+**Overall: PASS** (1 dimension scored CONDITIONAL, non-blocking, closed same session — see below)
 
-Evaluated 2026-08-17 by a fresh subagent with no authorship context. Scope actually diffed:
-3 new e2e test files + `sprint-contract.md` only — no production code changed (the underlying
-plumbing was already correct from Tier 0; this sprint was proving it).
+Evaluated 2026-08-17 by a fresh subagent with no authorship context. Diffed scope: 1 new e2e
+file, 1 new frontend API client, 1 new widget component + its 2 test files, a 14-line wiring
+diff in `EncounterWorkspacePage.tsx`, widget-scoped CSS.
 
 | #   | Dimension             | Verdict     | Evidence / why |
 | --- | ---------------------- | ----------- | -------------- |
-| 1   | Contract fulfillment  | PASS        | All 7 Done conditions independently reproduced **live**, not just via the new tests: patient dedup confirmed via `SELECT * FROM patients` (1 row for shared identity across 2 providers); DOB-mismatch and name-mismatch both produced distinct `patientId`s; cross-provider history injection reproduced live — Provider B's Plan literally contained `"continuing management per prior visit on ... "` sourced from Provider A's saved note. |
-| 2   | Correctness           | PASS        | Full manual curl flow: login → create encounters as A and B for identical patient identity → save A's note → B generates → B's Plan is history-informed → B's direct GET/PATCH on A's encounter both 403. |
-| 3   | Invariants (§2)       | PASS*       | CONTEXT-INJECTION: solid pass — `ScribeController.generate()` has no `@Body()` param at all; evaluator sent a maximally adversarial body (fabricated `priorHistory`, fake transcript) directly at the live endpoint, zero effect. TENANT-ISOLATION: direct-CRUD access provably intact (403 confirmed live). Flagged as CONDITIONAL that patient-scoped (not provider-scoped) history injection is a genuine interpretation call `AGENTS.md` didn't explicitly settle — *resolved same session*: presented to the user, who confirmed this is intended; now recorded as a clarified invariant in `AGENTS.md` §2 TENANT-ISOLATION rather than an agent's unilateral call. |
-| 4   | Verification quality  | PASS        | Traced `libs/ai/src/mock-provider.ts:61-64` — the "continuing management per prior visit" string is emitted *only* from the tool-call result, never derived from transcript text, so `context-behavior.e2e-spec.ts`'s assertion is structurally tied to injection, not coincidental text overlap. `context-injection.e2e-spec.ts`'s body-smuggling test isn't a strawman — evaluator independently sent an even more aggressive body live and confirmed no leak. |
-| 5   | No regressions        | PASS        | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 36/36 (29 prior + 7 new). |
-| 6   | Scope discipline      | PASS        | Diff is exactly 3 test files + the contract doc; no model-client/controller/repository code changed. |
-| 7   | Explainability        | PASS*       | CONTEXT-INJECTION design cleanly defensible and proven live. TENANT-ISOLATION carve-out was "arguable but not walkthrough-uncontested" at evaluation time — *resolved same session* via explicit human sign-off + the AGENTS.md clarification, so it's no longer resting only on the generator's own argument. |
+| 1   | Contract fulfillment  | PASS        | All 5 Done conditions reproduced live: search returns ranked code+description+similarity sourced only from `icd10_codes` (SQL-verified against all 234 rows); widget renders results; click appends `{code,description}`; dedup enforced both client-side (disabled button) and in `EncounterWorkspacePage`'s `onAppendIcd10`; save persists whatever `icd10Codes` array it's handed (unchanged `NotesService.save`), confirmed live. |
+| 2   | Correctness           | PASS        | Live curl chain through the actual Vite dev-proxy path (not just the isolated component) using the exact query-string shape `icd10.ts` builds — 200 with real, relevant results (`M54.5` top hit for "low back pain"). |
+| 3   | Invariants (§2)       | PASS        | CLINICAL-SAFETY: search path is 100% DB-backed, zero fabrication (every returned code verified to exist). Auth required (401 without token). SQL-injection-flavored query treated as harmless plain text (parameterized query confirmed safe, row count unchanged). Confirmed the backend does NOT independently re-validate that codes on save came from a real search — but this is unchanged, pre-existing Tier 0 behavior (human-in-the-loop editing already trusts the client's full note payload on save), not a new gap this sprint introduced. |
+| 4   | Verification quality  | PASS        | Limit edge cases (0, -5, 10000, non-numeric, missing) all independently reproduced live, matching `Icd10SearchRequestSchema`'s `z.coerce.number().int().min(1).max(20).default(10)`. e2e test asserts "no code outside `icd10_codes`," not tautological. |
+| 5   | No regressions        | PASS        | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 40/40. `pnpm --filter web run test` → 17/17 at evaluation time (now 21/21 after the follow-up below). |
+| 6   | Scope discipline      | PASS        | Nothing outside the icd10 widget touched — no admin/audit/drafts/embedding-model/dataset changes. |
+| 7   | Explainability        | CONDITIONAL | Flagged that `widget.test.tsx`/`append.test.tsx` inject a mocked `search` prop, so `Icd10SearchWidget`'s actual wiring to `icd10Api.search` was unverified by any automated test — evaluator closed the gap manually via a live proxy request, but that's evaluator-added evidence, not sprint-authored coverage. |
 
-\* Originally scored CONDITIONAL by the evaluator; both instances flagged the *same* underlying
-gap (an unresolved interpretation of TENANT-ISOLATION), not two separate issues. Resolved by
-surfacing the exact tradeoff to the user via `AskUserQuestion` rather than deciding unilaterally.
-
-**Required fixes before closing:** none blocking. The evaluator's one recommendation — "get
-explicit human sign-off on the TENANT-ISOLATION carve-out and record it in AGENTS.md itself" —
-was acted on immediately (see `AGENTS.md` §2 TENANT-ISOLATION, "Clarified scope" paragraph).
+**Required fixes before closing:** none blocking. Non-blocking recommendation — add a test
+exercising `icd10Api.search` itself — **closed same session**: added
+`apps/web/src/api/__tests__/icd10.test.ts` (4 tests: URL/query-encoding, default limit, error
+propagation). Writing it surfaced an unrelated, previously-invisible bug: Node 25's experimental
+native `localStorage` global shadows jsdom's in this test environment, so `api/client.ts` and
+`state/auth-context.tsx` had never actually been exercised by any test — `localStorage.setItem`
+silently wasn't a function. Fixed with an in-memory `Storage` polyfill in
+`apps/web/src/test/setup.ts`. Web suite now 21/21.
 
 **Only when Overall is PASS (or an accepted CONDITIONAL):** flip `feature-list.json` → `passing`,
 then update `progress.md` and `session-handoff.md`.

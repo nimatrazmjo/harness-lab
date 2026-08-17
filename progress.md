@@ -14,15 +14,14 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** Tier 0 core loop + patient-context sprint both code-complete, verified, and
-  independently evaluated PASS. Ready for the next Tier 1 sprint.
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 4 / 16 passing (`edge.no_clinical_content`, `patient.match`, `context.history_injection`, `context.behavior_differs`)   ·   **Tier 2:** 0 / 4 passing
+- **Active phase:** Tier 0 core loop + 2 Tier 1 sprints (patient-context, ICD-10 widget) all
+  code-complete, verified, and independently evaluated PASS. Ready for the next Tier 1 sprint.
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 7 / 16 passing (`edge.no_clinical_content`, `patient.match`, `context.history_injection`, `context.behavior_differs`, `icd10.vector_search`, `icd10.search_widget`, `icd10.append_assessment`)   ·   **Tier 2:** 0 / 4 passing
 - **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
   (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
   ideally by a fresh subagent) are part of the session protocol — see AGENTS.md §1/§5/§11.
-- **Next feature:** overwrite `sprint-contract.md` for the next sprint first — `icd10.search_widget`
-  (backend search already exists at `GET /icd10/search`, needs a frontend widget) or start on
-  `admin.*` (only a bare `@Roles('admin')` gate exists so far).
+- **Next feature:** overwrite `sprint-contract.md` for the next sprint first — the `admin.*`
+  cluster (only a bare `@Roles('admin')` gate exists so far) or `session.draft_persist`.
 - **Environment:** local bootstrap via `pnpm setup` (`tools/init.sh` → docker-compose Postgres+pgvector on host port **5433** — 5432 is occupied by an unrelated older project on this machine, `~/workstation/ai-clinical-scribe`, don't touch it). `AI_PROVIDER=mock` by default (deterministic, no network calls) — real Bedrock wiring exists in `libs/ai/src/bedrock-provider.ts` but is untested (no AWS creds in this environment).
 - **Open decisions:** none outstanding — raw `pg` + `node-pg-migrate` (not an ORM), zod validation via a custom `ZodValidationPipe`, plain CSS (no UI framework).
 - **Blockers:** `infra.rds_postgres_private` and `infra.ec2_nginx_tls` require an actual AWS account/credentials to provision EC2 + RDS — cannot be done by an agent unattended (see `infra/DEPLOY.md`). Everything code/config-side for both (migrations, nginx.conf, IAM notes, TLS verify script) is ready; only the real cloud provisioning step is outstanding.
@@ -30,6 +29,34 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — icd10.vector_search / icd10.search_widget / icd10.append_assessment (PASS)
+- Backend search already existed from Tier 0 (`GET /icd10/search`) — added dedicated
+  `apps/api/test/icd10-search.e2e-spec.ts` (relevance, limit param, empty-query rejection, auth
+  required). Built the frontend net-new: `apps/web/src/api/icd10.ts`, `Icd10SearchWidget.tsx`
+  (plain-English input, ranked results, per-result Add button), wired into
+  `EncounterWorkspacePage` with client-side dedup (`onAppendIcd10`).
+- Manually verified live in a browser: searched "sore throat," got `R07.0 Pain in throat` as a
+  ranked result, clicked Add, watched it appear in the note's ICD-10 codes, saved, and confirmed
+  via direct SQL that it persisted in `note_versions.icd10_codes`. (Discovered mid-walkthrough
+  that a click had missed the Generate button by ~15px, producing a false "insufficient content"
+  reading — re-clicked precisely and it worked; not a real bug, just my own imprecise click
+  coordinates, confirmed by zooming into the button region before retrying.)
+- Independent evaluator: **6/7 PASS, 1/7 CONDITIONAL** (non-blocking) — the widget's two component
+  tests (`widget.test.tsx`, `append.test.tsx`) both inject a mocked `search` prop, so
+  `icd10Api.search`'s real fetch wiring was unverified by anything automated. Closed same session:
+  added `apps/web/src/api/__tests__/icd10.test.ts` (4 tests).
+- Writing that test surfaced an unrelated, previously-invisible **test-environment bug**: Node 25's
+  experimental native `localStorage` global shadows jsdom's non-functional one in this vitest
+  setup — `window.localStorage === globalThis.localStorage` and neither had a working `setItem`.
+  Nothing had ever exercised `api/client.ts` or `state/auth-context.tsx` in a test before, so this
+  was silently broken and undetected. Fixed with a minimal in-memory `Storage` polyfill in
+  `apps/web/src/test/setup.ts`. Web suite: 17 → 21 tests, all green.
+- Also confirmed live: the search endpoint safely no-ops a SQL-injection-flavored query string
+  (parameterized query), rejects an empty query with 400, and requires auth.
+- **Next:** `admin.*` cluster or `session.draft_persist` — write `sprint-contract.md` first.
+
+---
 
 ### 2026-08-17 — patient.match / context.history_injection / context.behavior_differs (PASS)
 - Wrote `sprint-contract.md` for this cluster first, per the new contract-before-code rule.
