@@ -628,7 +628,7 @@
       "id": "audit.trail",
       "tier": 1,
       "title": "Audit log of saves and admin actions",
-      "status": "failing",
+      "status": "passing",
       "description": "Audit logs capture who did what and when for note saves and admin actions, stored in RDS.",
       "acceptance": [
         "Note saves and admin actions (roster/template changes) write audit rows with actor, action, target, timestamp.",

@@ -61,27 +61,27 @@ model choice, schema, streaming approach, VPC/secrets. If it can't be explained,
 _Prior sprints' scorecards are preserved in git history (search commit messages for
 "docs: record evaluator pass"). This section holds the latest sprint only._
 
-**Sprint:** `session.draft_persist, session.cross_device, edge.session_expired_save` ·
-**Overall: PASS** (7/7 dimensions, no CONDITIONALs)
+**Sprint:** `audit.trail` (the last Tier 1 item) · **Overall: PASS** (6/7 PASS, 1 CONDITIONAL,
+closed same session)
 
-Evaluated 2026-08-17 by a fresh subagent with no authorship context. Diffed scope: new
-`apps/api/src/drafts/{repository,service,controller,module}.ts`, small call-site diffs in
-`notes.module.ts`/`notes.service.ts` (delete draft on real save) and `app.module.ts`, 3 new e2e
-files, plus frontend wiring in `EncounterWorkspacePage.tsx` (restore-on-mount, debounced
-autosave-on-edit, guarded against firing mid-SSE-stream) and the corresponding `api/client.ts`
-(`put`) / `api/encounters.ts` additions.
+Evaluated 2026-08-17 by a fresh subagent with no authorship context. Diffed scope:
+`audit.service.ts` (filtering + provider-name join), `admin.mapper.ts`/`audit.mapper.ts` (new),
+call sites added in `admin.service.ts` (create/deactivate) and `templates.controller.ts`
+(create/update/delete), a new `GET /admin/audit-logs` route, `audit.ts` shared schema, and
+`audit.e2e-spec.ts`. `notes.service.ts` (Tier 0's existing `note.save` logging) untouched.
 
-| #   | Dimension             | Verdict | Evidence / why |
-| --- | ---------------------- | ------- | -------------- |
-| 1   | Contract fulfillment  | PASS    | All 7 Done conditions reproduced live, independent of the test suite: PUT/GET round-trip matched the raw `drafts` row byte-for-byte; fresh encounter returns `{note:null,updatedAt:null}`; two independent logins for the same provider (zero shared client state) saw the identical draft, and an edit from one was visible from the other on next fetch; a non-owning provider got 403 on both GET and PUT; a real save deleted the `drafts` row while leaving exactly one `note_versions` row; a garbage-token save attempt got 401, wrote zero versions, left the draft untouched, and a fresh login completed the save with matching content. |
-| 2   | Correctness           | PASS    | Live curl + direct `psql` queries against the real Postgres instance, not inferred from tests. The frontend browser-reload claim itself was outside what the evaluator could re-run, but it traced the mechanism the claim depends on (`getDraft` on mount, debounced `saveDraft` guarded by the `generating` flag for the full SSE stream duration) and confirmed it's real, not aspirational. |
-| 3   | Invariants (§2)       | PASS    | TENANT-ISOLATION: every draft call gated through `EncountersService.getForUser`, same pattern as the rest of the encounter surface. VERSION-IMMUTABILITY: draft deletion happens strictly after the `note_versions` INSERT, never touches it. Checked an adjacent risk not in the contract: a deactivated provider's draft rows stay fully intact (no cascade-delete), consistent with the prior sprint's data-preservation guarantee extending correctly to this new table. |
-| 4   | Verification quality  | PASS    | Tests assert real content via direct DB queries, not just API response shape; `edge-expired-save.e2e-spec.ts` proves zero data loss end-to-end (failed save → 0 versions → intact draft → fresh login → completed save with matching content), not a shortcut assertion. |
-| 5   | No regressions        | PASS    | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 69/69 (60 prior + 9 new), exact match. |
-| 6   | Scope discipline      | PASS    | Diff limited to drafts wiring + minimal necessary call sites; no migration added (table pre-existed unused since Tier 0); no `audit.trail` or unrelated changes. |
-| 7   | Explainability        | PASS    | Upsert-on-`encounter_id UNIQUE` is the correct primitive for one mutable draft row; the debounce-vs-SSE-streaming interaction was traced and confirmed correct, not just asserted. |
+| #   | Dimension             | Verdict     | Evidence / why |
+| --- | ---------------------- | ----------- | -------------- |
+| 1   | Contract fulfillment  | PASS        | All 8 Done conditions reproduced live, independent of the test suite: provider create/deactivate each wrote the right audit row; template create/update/delete wrote 3 rows in the correct order with correct `target_id`; `GET /admin/audit-logs` returned newest-first with actor identity; the `action` filter and the `from`/`to` date-range filter (`?from=<tomorrow>` → 0 rows, `?from=<today>` → matches) both genuinely filter, not no-ops; non-admin got 403; a note saved with PHI-laden content left zero trace in `metadata` (only `{versionNumber}`); a provider created with a real password left zero trace of it in the raw `audit_logs.metadata` column, checked via psql. |
+| 2   | Correctness           | PASS        | Live curl + direct `psql` against the real Postgres container throughout, not inferred from the test suite. |
+| 3   | Invariants (§2)       | PASS        | SECRETS: confirmed via raw DB query, not API response shape, that no password or PHI ever reaches `metadata` across both the new admin-action logging and the pre-existing note-save logging. TENANT-ISOLATION: `GET /admin/audit-logs` sits under the same class-level `@Roles('admin')` gate as the rest of `AdminController`. PERSISTENCE: reuses the pre-existing `audit_logs` table and the shared `PG_POOL`, no new migration. Grepped for any `UPDATE`/`DELETE` on `audit_logs` — none exist; the contract's "append-only in spirit, not a formal AGENTS.md invariant for this table" framing was checked and found honest, not overclaimed. |
+| 4   | Verification quality  | CONDITIONAL | The sprint's own verification plan claimed `audit.e2e-spec.ts` covered all Done conditions, but date-range filtering — an explicit Done condition — had no automated test, only the `action` filter did. The evaluator verified date-range filtering worked correctly live, so this was a coverage gap, not a bug. **Closed same session**: added a `filters by date range` test (8th test in the file). |
+| 5   | No regressions        | PASS        | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 76/76 at evaluation time (69 prior + 7 new), now 77/77 after the follow-up test. |
+| 6   | Scope discipline      | PASS        | `git status` confined to audit call sites + new audit files + the test file; no changes to encounters, drafts, or any prior sprint's code. |
+| 7   | Explainability        | PASS        | `@Global()` `AuditModule` correctly explains why no new module imports were needed; `LEFT JOIN providers` for `actorName` is the minimal-cost way to satisfy "actor identity"; metadata scoping (structural facts only, consistently applied across all 5 call sites) is a clean, defensible pattern. |
 
-**Required fixes before closing:** none.
+**Required fixes before closing:** none remaining — the one flagged gap (date-range filter test)
+was closed in the same session, before this sprint was marked done.
 
 **Only when Overall is PASS (or an accepted CONDITIONAL):** flip `feature-list.json` → `passing`,
 then update `progress.md` and `session-handoff.md`.

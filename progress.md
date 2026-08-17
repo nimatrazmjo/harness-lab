@@ -14,15 +14,16 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** Tier 0 core loop + 4 Tier 1 sprints (patient-context, ICD-10 widget, admin
-  dashboard, draft persistence) all code-complete, verified, and independently evaluated PASS.
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 15 / 16 passing (only `audit.trail` remains)   ·   **Tier 2:** 0 / 4 passing
+- **Active phase:** **Tier 1 is complete (16/16).** Tier 0 core loop + all 5 Tier 1 sprints
+  code-complete, verified, and independently evaluated PASS.
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 16 / 16 passing   ·   **Tier 2:** 0 / 4 passing
 - **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
   (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
   ideally by a fresh subagent) are part of the session protocol — see AGENTS.md §1/§5/§11.
-- **Next feature:** `audit.trail` — the last Tier 1 item. `AuditService.log()` exists and is
-  called on note save; needs it called from admin actions too, plus a query endpoint
-  (`AuditService.listAll()` exists but isn't exposed via a controller).
+- **Next feature:** no more Tier 1 work. Options: a Tier 2 "pioneer" feature (per
+  `docs/PRODUCT.md`, pick one or two, done well — version diff view is the cheapest given
+  immutable versions already exist), or return to `infra.rds_postgres_private`/
+  `infra.ec2_nginx_tls` if real AWS access ever becomes available.
 - **Environment:** local bootstrap via `pnpm setup` (`tools/init.sh` → docker-compose Postgres+pgvector on host port **5433** — 5432 is occupied by an unrelated older project on this machine, `~/workstation/ai-clinical-scribe`, don't touch it). `AI_PROVIDER=mock` by default (deterministic, no network calls) — real Bedrock wiring exists in `libs/ai/src/bedrock-provider.ts` but is untested (no AWS creds in this environment).
 - **Open decisions:** none outstanding — raw `pg` + `node-pg-migrate` (not an ORM), zod validation via a custom `ZodValidationPipe`, plain CSS (no UI framework).
 - **Blockers:** `infra.rds_postgres_private` and `infra.ec2_nginx_tls` require an actual AWS account/credentials to provision EC2 + RDS — cannot be done by an agent unattended (see `infra/DEPLOY.md`). Everything code/config-side for both (migrations, nginx.conf, IAM notes, TLS verify script) is ready; only the real cloud provisioning step is outstanding.
@@ -30,6 +31,30 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — audit.trail (PASS) — Tier 1 complete (16/16)
+- Last open Tier 1 item. `AuditService.log()`/`listAll()` already existed from Tier 0 (only
+  called from `NotesService.save()`) — this sprint wired it into the admin write paths that
+  didn't call it yet (`AdminService.createProvider`/`deactivateProvider`,
+  `TemplatesController`'s create/update/delete) and exposed `listAll()` via a new
+  `GET /admin/audit-logs` (admin-only, filterable by actor/action/date-range, actor name joined
+  from `providers` for readability).
+- Verified live + via raw psql (not just API response shape) that neither a provider's password
+  nor a note's clinical content ever lands in `audit_logs.metadata` — only structural facts
+  (email, role, version number, field names changed).
+- Independent evaluator: **6/7 PASS, 1/7 CONDITIONAL** (non-blocking, closed same session) — the
+  sprint's own verification plan claimed the test file covered all Done conditions, but the
+  date-range filter (an explicit Done condition) had no automated test, only `action` did. The
+  evaluator verified date-range filtering worked correctly live and flagged the coverage gap
+  specifically, not a behavior bug. Added the missing test before closing.
+- `pnpm --filter api run test:e2e` now 77/77 (was 69).
+- **Tier 1 is now 16/16 — complete.** No more accepted-CONDITIONAL debt outstanding; every
+  CONDITIONAL across all 5 Tier 1 sprints was closed same-session before the sprint was marked
+  done.
+- **Next:** no more Tier 1 work. Tier 2 pioneer feature (see `docs/PRODUCT.md` — one or two, done
+  well) or return to the blocked AWS infra items if access becomes available.
+
+---
 
 ### 2026-08-17 — session.draft_persist / session.cross_device / edge.session_expired_save (PASS)
 - Net-new work (the `drafts` table existed in the schema since Tier 0 but was never read/written).
