@@ -40,3 +40,18 @@ export const NoteVersionSchema = z.object({
   createdAt: z.string().datetime(),
 });
 export type NoteVersion = z.infer<typeof NoteVersionSchema>;
+
+/** In-progress (not yet saved) note state — persisted continuously so a refresh, browser
+ * close/reopen, or a different device shows exactly what the provider was working on
+ * (session.draft_persist / session.cross_device). Distinct from NoteVersion: a draft is
+ * mutable and ephemeral; cleared once the note is actually saved. */
+export const SaveDraftRequestSchema = z.object({
+  note: SoapNoteSchema,
+});
+export type SaveDraftRequest = z.infer<typeof SaveDraftRequestSchema>;
+
+export const DraftResponseSchema = z.object({
+  note: SoapNoteSchema.nullable(),
+  updatedAt: z.string().datetime().nullable(),
+});
+export type DraftResponse = z.infer<typeof DraftResponseSchema>;
