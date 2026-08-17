@@ -3,17 +3,21 @@
 > **Agent-agnostic harness contract.** This is the single source of truth for how _any_ AI
 > coding agent (Claude Code, Cursor, Copilot, Codex, …) works in this repo.
 >
-> - Claude Code: `ln -s AGENTS.md CLAUDE.md`
+> - Claude Code reads `CLAUDE.md`, **not** `AGENTS.md`. Add a one-line `CLAUDE.md` containing
+>   `@AGENTS.md` (imports this file; works cross-platform), or `ln -s AGENTS.md CLAUDE.md` on macOS/Linux.
 > - Cursor: add `Always read /AGENTS.md first` to `.cursor/rules`
 > - Keep this file short and **earned** — every rule traces to a grading criterion or a real
 >   failure we've seen. Delete nothing without a reason; add nothing speculative.
 
 > **Session protocol — every agent, every session:**
 >
-> 1. **Read first:** `progress.md` (where we are) → `docs/PRODUCT.md` (what & why) →
->    `docs/ARCHITECTURE.md` (how it fits together) → `feature-list.json` (what's next).
-> 2. **Work** the next `failing` feature (see §5).
-> 3. **Update last:** prepend a dated entry to `progress.md` and flip the feature's `status`.
+> 1. **Resume:** read `session-handoff.md` first — it says exactly where the last session stopped.
+> 2. **Orient:** skim `progress.md` (where we've been), `docs/PRODUCT.md` + `docs/ARCHITECTURE.md`
+>    (what/why + how), and `feature-list.json` (what's next).
+> 3. **Work** the next `failing` feature (see §5), or resume the in-flight one from the handoff.
+> 4. **Hand off:** before ending (or when context runs low), **overwrite** `session-handoff.md`
+>    with the current snapshot, prepend a dated entry to `progress.md`, and flip any finished
+>    feature's `status`.
 
 ---
 
@@ -78,14 +82,16 @@ libs/
 infra/            # nginx conf, docker-compose (local pg+pgvector), IaC / deploy notes
 tools/            # init.sh, seed scripts, icd10 embedding loader
 docs/             # PRODUCT.md (what & why) + ARCHITECTURE.md (how it fits together)
-AGENTS.md         # this file — the harness contract
-progress.md       # rolling session log: read at start, update at end
-feature-list.json # the prioritized, tier-ordered source of truth (work top-down)
+AGENTS.md          # this file — the harness contract (source of truth)
+CLAUDE.md          # one-line bridge: imports AGENTS.md for Claude Code
+progress.md        # rolling log: durable, append-only history (append at session end)
+session-handoff.md # warm baton-pass: overwritten each session, read first to resume
+feature-list.json  # the prioritized, tier-ordered source of truth (work top-down)
 ```
 
-**Context files (read at session start, keep current):** `progress.md`, `docs/PRODUCT.md`,
-`docs/ARCHITECTURE.md`. They carry _where we are_, _what & why_, and _how it fits_ respectively —
-so a fresh session recovers context by reading, not re-exploring.
+**Context files (read at session start, keep current):** `session-handoff.md` (where we STOPPED —
+read first to resume), `progress.md` (where we've been), `docs/PRODUCT.md` (what & why),
+`docs/ARCHITECTURE.md` (how it fits). A fresh session recovers context by reading these, not re-exploring.
 
 Shared request/response types live in `libs/shared-types` and are imported by both sides.
 A backend contract change that breaks the frontend must fail at **typecheck**, not at runtime.
