@@ -52,9 +52,18 @@ directly. If a change would violate one, stop and flag it instead.
   templates, audit_logs, drafts, icd10_codes — lives in **RDS Postgres**. No SQLite, no
   in-memory stores, no flat files for anything that must survive a restart.
 - **[TENANT-ISOLATION]** Every provider-facing query is scoped to the authenticated
-  `provider_id`. A provider must **never** read or write another provider's encounter.
-  Admin-wide access is allowed **only** through an explicit admin guard. This is a security
-  invariant — cover it with a test that must stay green.
+  `provider_id`. A provider must **never** read or write another provider's encounter
+  **record** — no direct GET/PATCH/list access to it, ever. Admin-wide access is allowed
+  **only** through an explicit admin guard. This is a security invariant — cover it with a
+  test that must stay green.
+  **Clarified scope (human sign-off 2026-08-17):** this governs direct access to another
+  provider's *encounter records*. It does **not** forbid patient-scoped clinical context —
+  a returning patient's prior assessment/plan (fetched via the backend history tool during
+  generation, see [CONTEXT-INJECTION]) may inform generation for **any** provider currently
+  treating that same patient, not just the original author. This mirrors continuity of care
+  in a real shared EHR: the isolation boundary is the encounter record, not the patient's
+  clinical history. If this scope ever needs tightening (e.g. requiring an explicit care-team
+  grant before history crosses providers), that's a deliberate product change, not a bug fix.
 - **[VERSION-IMMUTABILITY]** Editing a note **INSERTs** a new `note_versions` row. Never
   `UPDATE` or `DELETE` an existing version. Prior versions are retrievable forever with author
   and timestamp.
