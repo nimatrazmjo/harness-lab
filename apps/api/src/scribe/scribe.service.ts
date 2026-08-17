@@ -1,5 +1,11 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { buildTemplateInstructions, hasClinicalContent, type ModelClient, type PriorEncounterSummary } from "@scribe/ai";
+import {
+  buildTemplateInstructions,
+  hasClinicalContent,
+  inferWritingStyle,
+  type ModelClient,
+  type PriorEncounterSummary,
+} from "@scribe/ai";
 import type { Icd10CodeRef, ScribeStreamEvent } from "@scribe/shared-types";
 import { MODEL_CLIENT } from "../ai/ai.module";
 import type { CurrentUserPayload } from "../auth/current-user.decorator";
@@ -43,6 +49,11 @@ export class ScribeService {
       : null;
     const templateInstructions = buildTemplateInstructions(appliedTemplate);
 
+    // Learned fresh, server-side, from this provider's own saved history on every call — never
+    // client-supplied, never another provider's rows (AGENTS.md [CONTEXT-INJECTION], [TENANT-ISOLATION]).
+    const recentOwnNotes = await this.notesRepo.getRecentByAuthor(user.id, 10);
+    const writingStyle = inferWritingStyle(recentOwnNotes);
+
     const patientId = encounter.patient_id;
     const patientHistoryTool = {
       name: "get_patient_history" as const,
@@ -77,6 +88,7 @@ export class ScribeService {
       transcript,
       templateInstructions,
       templateApplied: appliedTemplate ?? undefined,
+      writingStyle,
       patientHistoryTool,
       icd10CandidateTool,
     })) {

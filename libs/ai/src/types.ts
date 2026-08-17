@@ -1,4 +1,5 @@
 import type { Icd10CodeRef, SoapNote } from "@scribe/shared-types";
+import type { WritingStyleProfile } from "./writing-style";
 
 export type SoapSection = "subjective" | "objective" | "assessment" | "plan";
 
@@ -49,6 +50,9 @@ export interface GenerateSoapNoteInput {
   transcript: string;
   templateInstructions: string;
   templateApplied?: AppliedTemplate;
+  /** Learned server-side from the provider's own saved note history (pioneer.writing_style).
+   * Undefined/default means "no adaptation" — output is identical to the unadapted baseline. */
+  writingStyle?: WritingStyleProfile;
   patientHistoryTool: PatientHistoryTool;
   icd10CandidateTool: Icd10CandidateTool;
 }

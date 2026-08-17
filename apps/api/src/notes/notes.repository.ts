@@ -102,6 +102,21 @@ export class NotesRepository {
     return result.rows[0] ?? null;
   }
 
+  /** A provider's own most recently saved notes, across all their encounters — used to learn a
+   * writing-style preference (pioneer.writing_style). Never reads another provider's rows
+   * (AGENTS.md [TENANT-ISOLATION]). */
+  async getRecentByAuthor(authorId: string, limit: number): Promise<Pick<NoteVersionRow, "subjective" | "plan">[]> {
+    const result = await this.pool.query<Pick<NoteVersionRow, "subjective" | "plan">>(
+      `SELECT subjective, plan
+       FROM note_versions
+       WHERE author_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [authorId, limit],
+    );
+    return result.rows;
+  }
+
   /** Most recent saved note per encounter, for a set of encounters (prior-history lookups). */
   async getLatestPerEncounter(encounterIds: string[]): Promise<NoteVersionRow[]> {
     if (encounterIds.length === 0) return [];

@@ -25,6 +25,17 @@ function extractSubjective(transcript: string): string {
     : `Patient-reported findings derived from encounter transcript: ${transcript.slice(0, 300)}`;
 }
 
+/** Applies a learned terminology preference (pioneer.writing_style). No-op unless the profile
+ * says "pt" — the default "patient" leaves every section byte-identical to unadapted output. */
+function applyWritingStyle(sections: Record<SoapSection, string>, profile?: { patientTerm: "pt" | "patient" }) {
+  if (profile?.patientTerm !== "pt") return sections;
+  const styled: Record<SoapSection, string> = { ...sections };
+  for (const key of Object.keys(styled) as SoapSection[]) {
+    styled[key] = styled[key].replace(/\bPatient\b/g, "Pt").replace(/\bpatient\b/g, "pt");
+  }
+  return styled;
+}
+
 function extractObjective(transcript: string): string {
   const examLines = transcript
     .split(/\n|(?<=[.!?])\s+/)
@@ -70,18 +81,23 @@ export class MockModelClient implements ModelClient {
       plan = `[${input.templateApplied.name}] ${plan} Template guidance applied: ${input.templateApplied.promptInstructions.trim()}`;
     }
 
-    for await (const chunk of streamSection("subjective", subjective)) yield chunk;
-    for await (const chunk of streamSection("objective", objective)) yield chunk;
-    for await (const chunk of streamSection("assessment", assessmentBase)) yield chunk;
-    for await (const chunk of streamSection("plan", plan)) yield chunk;
+    const styled = applyWritingStyle(
+      { subjective, objective, assessment: assessmentBase, plan },
+      input.writingStyle,
+    );
+
+    for await (const chunk of streamSection("subjective", styled.subjective)) yield chunk;
+    for await (const chunk of streamSection("objective", styled.objective)) yield chunk;
+    for await (const chunk of streamSection("assessment", styled.assessment)) yield chunk;
+    for await (const chunk of streamSection("plan", styled.plan)) yield chunk;
 
     yield { type: "icd10", codes: icd10Codes };
 
     const note: SoapNote = {
-      subjective,
-      objective,
-      assessment: assessmentBase,
-      plan,
+      subjective: styled.subjective,
+      objective: styled.objective,
+      assessment: styled.assessment,
+      plan: styled.plan,
       icd10Codes,
     };
     yield { type: "done", note };
