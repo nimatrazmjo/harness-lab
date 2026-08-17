@@ -58,30 +58,33 @@ model choice, schema, streaming approach, VPC/secrets. If it can't be explained,
 
 ## Output (the evaluator fills this in)
 
-**Sprint:** `infra.env_secrets, infra.connection_pooling, infra.schema_erd, auth.login,
-auth.roles_seed, auth.tenant_isolation, encounter.create, encounter.input,
-scribe.generate_stream, scribe.soap_sections, scribe.icd10_assessment, note.inline_edit,
-note.save, note.versioning_immutable, note.version_history` (Tier 0 core loop) · **Overall: PASS**
+_Prior sprint's scorecard (Tier 0 core loop, all PASS) is preserved in git history — see the
+`docs: retroactive sprint-contract...` commit. This section holds the latest sprint only._
 
-Evaluated 2026-08-17 by a fresh subagent with no authorship context, per this rubric's own
-"separate the evaluator from the generator" instruction — see `sprint-contract.md` for the
-done-conditions it checked against.
+**Sprint:** `patient.match, context.history_injection, context.behavior_differs` ·
+**Overall: PASS** (2 dimensions scored CONDITIONAL, both resolved — see below)
 
-| #   | Dimension            | Verdict | Evidence / why |
-| --- | -------------------- | ------- | -------------- |
-| 1   | Contract fulfillment | PASS    | All 15 checked Done conditions in `sprint-contract.md` verified independently; the 2 unchecked (RDS-PRIVATE, EC2-nginx-TLS) are honestly left unchecked/`blocked`, not claimed. |
-| 2   | Correctness          | PASS    | Own curl session: login → create encounter (201) → PATCH transcript → `POST /scribe/generate` streamed 84 SSE chunks in 0.146s with real content → saved note twice → `SELECT * FROM note_versions` confirmed v1 untouched, v2 inserted. |
-| 3   | Invariants (§2)      | PASS    | Own curl as Provider B against Provider A's encounter got 403 on GET/PATCH/generate/notes-history/notes-save. Empty + keyboard-mash transcripts both returned only `insufficient_content`, no fabricated note. Grepped for `UPDATE`/`DELETE` on `note_versions` — none exist. `pool.e2e-spec.ts` asserts bounded count + instance reuse. `scripts/check-no-committed-secrets.sh` exit 0, `.env` untracked. Tool closures (`patientHistoryTool`/`icd10CandidateTool`) confirmed server-side only. |
-| 4   | Verification quality | PASS    | Read the streaming, tenant-isolation, ICD-10, versioning, and pooling e2e tests directly — all assert the meaningful thing (chunk count + time spread, literal 403, DB-membership of returned codes, byte-level row check + 5-way concurrent-save race, bounded pool count), none tautological. Gap noted: no e2e-level HTTP test for garbage input on the live `/scribe/generate` route (only unit-tested at `hasClinicalContent`) — closed same day, see `edge-no-content.e2e-spec.ts`. |
-| 5   | No regressions        | PASS    | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 27/27, matching the contract's claimed count exactly. |
-| 6   | Scope discipline     | PASS    | Only Tier 0 flipped in `feature-list.json`; Tier 1/2 untouched. No Playwright added (contract said Vitest-only). `/admin` verified as a bare smoke-test gate, not a shipped Tier 1 surface (404 on `/admin/encounters`, correct 403/200 split on `/admin/ping`). |
-| 7   | Explainability       | PASS    | `docs/erd.md` matches the migration table-by-table including every claimed index. SSE-over-POST rationale and the `pg_advisory_xact_lock` concurrency design both hold up and were proven live, not just asserted. |
+Evaluated 2026-08-17 by a fresh subagent with no authorship context. Scope actually diffed:
+3 new e2e test files + `sprint-contract.md` only — no production code changed (the underlying
+plumbing was already correct from Tier 0; this sprint was proving it).
 
-**Required fixes before closing:** none — no blocking issues found.
+| #   | Dimension             | Verdict     | Evidence / why |
+| --- | ---------------------- | ----------- | -------------- |
+| 1   | Contract fulfillment  | PASS        | All 7 Done conditions independently reproduced **live**, not just via the new tests: patient dedup confirmed via `SELECT * FROM patients` (1 row for shared identity across 2 providers); DOB-mismatch and name-mismatch both produced distinct `patientId`s; cross-provider history injection reproduced live — Provider B's Plan literally contained `"continuing management per prior visit on ... "` sourced from Provider A's saved note. |
+| 2   | Correctness           | PASS        | Full manual curl flow: login → create encounters as A and B for identical patient identity → save A's note → B generates → B's Plan is history-informed → B's direct GET/PATCH on A's encounter both 403. |
+| 3   | Invariants (§2)       | PASS*       | CONTEXT-INJECTION: solid pass — `ScribeController.generate()` has no `@Body()` param at all; evaluator sent a maximally adversarial body (fabricated `priorHistory`, fake transcript) directly at the live endpoint, zero effect. TENANT-ISOLATION: direct-CRUD access provably intact (403 confirmed live). Flagged as CONDITIONAL that patient-scoped (not provider-scoped) history injection is a genuine interpretation call `AGENTS.md` didn't explicitly settle — *resolved same session*: presented to the user, who confirmed this is intended; now recorded as a clarified invariant in `AGENTS.md` §2 TENANT-ISOLATION rather than an agent's unilateral call. |
+| 4   | Verification quality  | PASS        | Traced `libs/ai/src/mock-provider.ts:61-64` — the "continuing management per prior visit" string is emitted *only* from the tool-call result, never derived from transcript text, so `context-behavior.e2e-spec.ts`'s assertion is structurally tied to injection, not coincidental text overlap. `context-injection.e2e-spec.ts`'s body-smuggling test isn't a strawman — evaluator independently sent an even more aggressive body live and confirmed no leak. |
+| 5   | No regressions        | PASS        | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 36/36 (29 prior + 7 new). |
+| 6   | Scope discipline      | PASS        | Diff is exactly 3 test files + the contract doc; no model-client/controller/repository code changed. |
+| 7   | Explainability        | PASS*       | CONTEXT-INJECTION design cleanly defensible and proven live. TENANT-ISOLATION carve-out was "arguable but not walkthrough-uncontested" at evaluation time — *resolved same session* via explicit human sign-off + the AGENTS.md clarification, so it's no longer resting only on the generator's own argument. |
 
-**Non-blocking follow-up (applied same session):** added `apps/api/test/edge-no-content.e2e-spec.ts`
-hitting the live SSE endpoint with empty/garbage transcripts, closing the one coverage gap the
-evaluator flagged in dimension 4.
+\* Originally scored CONDITIONAL by the evaluator; both instances flagged the *same* underlying
+gap (an unresolved interpretation of TENANT-ISOLATION), not two separate issues. Resolved by
+surfacing the exact tradeoff to the user via `AskUserQuestion` rather than deciding unilaterally.
+
+**Required fixes before closing:** none blocking. The evaluator's one recommendation — "get
+explicit human sign-off on the TENANT-ISOLATION carve-out and record it in AGENTS.md itself" —
+was acted on immediately (see `AGENTS.md` §2 TENANT-ISOLATION, "Clarified scope" paragraph).
 
 **Only when Overall is PASS (or an accepted CONDITIONAL):** flip `feature-list.json` → `passing`,
 then update `progress.md` and `session-handoff.md`.

@@ -350,7 +350,7 @@
       "id": "patient.match",
       "tier": 1,
       "title": "Match returning patients",
-      "status": "failing",
+      "status": "passing",
       "description": "Detect when an encounter is for a patient who already has saved notes, matched by first name, last name, and DOB.",
       "acceptance": [
         "Starting an encounter for an existing patient (first+last+DOB) links to that patient.",
@@ -368,7 +368,7 @@
       "id": "context.history_injection",
       "tier": 1,
       "title": "Backend tool-call history injection",
-      "status": "failing",
+      "status": "passing",
       "description": "For a returning patient, the AI retrieves and injects prior encounter history as context during generation via a backend tool/function call \u2014 not by stuffing prior notes into the frontend prompt.",
       "acceptance": [
         "Prior history is fetched by a backend tool/function call during generation.",
@@ -387,7 +387,7 @@
       "id": "context.behavior_differs",
       "tier": 1,
       "title": "Returning vs first-time behavior differs",
-      "status": "failing",
+      "status": "passing",
       "description": "Generation demonstrably behaves differently for a returning patient versus a first-time patient.",
       "acceptance": [
         "A returning patient's note reflects injected history; a first-time patient's does not.",

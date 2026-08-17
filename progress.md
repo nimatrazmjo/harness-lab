@@ -14,15 +14,15 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** Tier 0 core loop is code-complete, verified, and independently evaluated
-  (PASS, all 7 rubric dimensions — see `evaluator-rubric.md`). Ready to start Tier 1.
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 1 / 16 passing (`edge.no_clinical_content`)   ·   **Tier 2:** 0 / 4 passing
+- **Active phase:** Tier 0 core loop + patient-context sprint both code-complete, verified, and
+  independently evaluated PASS. Ready for the next Tier 1 sprint.
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 4 / 16 passing (`edge.no_clinical_content`, `patient.match`, `context.history_injection`, `context.behavior_differs`)   ·   **Tier 2:** 0 / 4 passing
 - **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
   (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
-  ideally by a fresh subagent) are now part of the session protocol — see AGENTS.md §1/§5/§11.
-- **Next feature:** overwrite `sprint-contract.md` for the next sprint first — `patient.match`
-  (mostly already true via `PatientsRepository.findOrCreate` dedup — write the dedicated test) or
-  `icd10.search_widget`.
+  ideally by a fresh subagent) are part of the session protocol — see AGENTS.md §1/§5/§11.
+- **Next feature:** overwrite `sprint-contract.md` for the next sprint first — `icd10.search_widget`
+  (backend search already exists at `GET /icd10/search`, needs a frontend widget) or start on
+  `admin.*` (only a bare `@Roles('admin')` gate exists so far).
 - **Environment:** local bootstrap via `pnpm setup` (`tools/init.sh` → docker-compose Postgres+pgvector on host port **5433** — 5432 is occupied by an unrelated older project on this machine, `~/workstation/ai-clinical-scribe`, don't touch it). `AI_PROVIDER=mock` by default (deterministic, no network calls) — real Bedrock wiring exists in `libs/ai/src/bedrock-provider.ts` but is untested (no AWS creds in this environment).
 - **Open decisions:** none outstanding — raw `pg` + `node-pg-migrate` (not an ORM), zod validation via a custom `ZodValidationPipe`, plain CSS (no UI framework).
 - **Blockers:** `infra.rds_postgres_private` and `infra.ec2_nginx_tls` require an actual AWS account/credentials to provision EC2 + RDS — cannot be done by an agent unattended (see `infra/DEPLOY.md`). Everything code/config-side for both (migrations, nginx.conf, IAM notes, TLS verify script) is ready; only the real cloud provisioning step is outstanding.
@@ -30,6 +30,30 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — patient.match / context.history_injection / context.behavior_differs (PASS)
+- Wrote `sprint-contract.md` for this cluster first, per the new contract-before-code rule.
+  Rationale documented up front: the underlying plumbing (patient dedup in
+  `PatientsRepository.findOrCreate`, the `patientHistoryTool` in `ScribeService`) already existed
+  as a side effect of Tier 0 — this was a test-writing sprint, not a build sprint.
+- Added `apps/api/test/{patient-match,context-behavior,context-injection}.e2e-spec.ts` (7 tests).
+  All passed on the first run against real Postgres — confirmed the existing behavior was already
+  correct, just unverified at the e2e level. `pnpm --filter api run test:e2e` now 36/36.
+- Independent evaluator subagent: **5/7 PASS, 2/7 CONDITIONAL** — both instances of CONDITIONAL
+  flagged the same thing: `ScribeService`'s `patientHistoryTool` scopes prior history by
+  `patient_id`, not `provider_id`, so Provider B automatically gets Provider A's prior
+  assessment/plan for a shared patient. The evaluator confirmed this live and correctly declined
+  to rubber-stamp it as fine just because `sprint-contract.md` (written by the same agent) argued
+  it was intentional — it flagged that this was an agent's unilateral interpretation of a
+  "non-negotiable" invariant with no recorded human sign-off.
+- Surfaced the exact tradeoff to the user via `AskUserQuestion` rather than deciding alone. User
+  confirmed patient-scoped history sharing is intended (mirrors real EHR continuity of care).
+  Recorded as a **clarified invariant in `AGENTS.md` §2 TENANT-ISOLATION** ("Clarified scope"
+  paragraph) so this is settled going forward, not an ambiguity anyone has to re-litigate.
+- No production code changed this sprint — diff is 3 new test files + doc updates.
+- **Next:** `icd10.search_widget` or `admin.*` — write `sprint-contract.md` first.
+
+---
 
 ### 2026-08-17 — Harness gates adopted; Tier 0 independently evaluated (PASS)
 - User added `clean-state-checklist.md`, `sprint-contract.md`, `evaluator-rubric.md` and updated
