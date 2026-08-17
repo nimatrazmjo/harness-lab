@@ -26,6 +26,7 @@ export function EncounterWorkspacePage() {
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!encounterId) return;
@@ -36,7 +37,26 @@ export function EncounterWorkspacePage() {
     });
     templatesApi.listActive().then(setTemplates);
     encountersApi.history(encounterId).then(setHistory);
+    // Restore any in-progress (not yet saved) note — survives refresh, close/reopen, and a
+    // different device, because it's read from RDS, not browser state (session.draft_persist).
+    encountersApi.getDraft(encounterId).then((draft) => {
+      if (draft.note) setNote(draft.note);
+    });
   }, [encounterId]);
+
+  // Debounced draft autosave — every edit (and the settled result of a generation) is
+  // persisted to RDS, not just held in memory. Skipped mid-stream: token-by-token updates
+  // during generation would otherwise fire a write per word.
+  useEffect(() => {
+    if (!encounterId || !note || generating) return;
+    if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    draftSaveTimer.current = setTimeout(() => {
+      encountersApi.saveDraft(encounterId, note);
+    }, 800);
+    return () => {
+      if (draftSaveTimer.current) clearTimeout(draftSaveTimer.current);
+    };
+  }, [note, generating, encounterId]);
 
   function onTranscriptChange(value: string) {
     setTranscript(value);
