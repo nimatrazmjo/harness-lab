@@ -590,7 +590,7 @@
       "id": "edge.no_clinical_content",
       "tier": 1,
       "title": "Non-happy-path: no clinical content",
-      "status": "failing",
+      "status": "passing",
       "description": "A transcript with no clinically meaningful content is handled gracefully \u2014 the AI does not fabricate a SOAP note.",
       "acceptance": [
         "Empty/garbage clinical input returns a clear 'insufficient content' response.",
