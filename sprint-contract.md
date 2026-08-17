@@ -17,98 +17,77 @@ goalposts or drift into adjacent work — the two most common ways an agent fake
 
 ## Active sprint
 
-**Feature(s):** `patient.match`, `context.history_injection`, `context.behavior_differs`
-**Goal (one sentence):** A returning patient (same first+last+DOB) is recognized and linked to
-one patient record, and the AI's generation for that patient is demonstrably informed by their
-prior encounter history — fetched by a backend tool call, never supplied by the client — while a
-first-time patient's generation shows no such influence.
-**Tier:** 1 · **Branch:** `feat/patient-context-matching`
+**Feature(s):** `icd10.vector_search`, `icd10.search_widget`, `icd10.append_assessment`
+**Goal (one sentence):** A provider can type a symptom/condition in plain English into a
+standalone widget in the encounter workspace, see ranked real ICD-10 matches from the pgvector
+search, and click one to append it to the open note's codes — persisting on save.
+**Tier:** 1 · **Branch:** `feat/icd10-search-widget`
 
 ### In scope (only these)
 
-- Dedicated e2e test coverage proving `patient.match`, `context.history_injection`, and
-  `context.behavior_differs` at the three test paths `feature-list.json` names
-- Fixing anything those tests reveal is actually broken (expected: none — see rationale below)
+- `apps/api/test/icd10-search.e2e-spec.ts` — dedicated e2e coverage for the existing
+  `GET /icd10/search` endpoint (the endpoint and its service/repository already exist from Tier 0;
+  only dedicated e2e proof is missing, same pattern as the last sprint)
+- `apps/web/src/api/icd10.ts` — frontend API client for the search endpoint
+- `apps/web/src/features/icd10/Icd10SearchWidget.tsx` — plain-English input, ranked results
+  (code + description), an "Add" action per result
+- Wiring the widget into `EncounterWorkspacePage` so a click appends to the open note's
+  `icd10Codes` array (dedup — clicking the same code twice doesn't duplicate it)
+- Component tests at the two paths `feature-list.json` names:
+  `apps/web/src/features/icd10/__tests__/widget.test.tsx` and `.../append.test.tsx`
 
 ### Explicitly OUT of scope (do not touch this sprint)
 
-- ICD-10 search widget, admin CRUD, session/draft persistence, audit query surface — separate
-  Tier 1 sprints
-- Any change to the mock/Bedrock model-client behavior itself (only testing what exists)
-
-### Rationale — why this is mostly a test-writing sprint, not a build sprint
-
-Tier 0 already built the underlying plumbing as a side effect of doing encounter creation and
-scribe generation correctly:
-
-- `EncountersService.create()` calls `PatientsRepository.findOrCreate({firstName, lastName, dob})`
-  — patient identity IS the dedup key already (`patients` table has a `UNIQUE(first_name,
-  last_name, dob)` constraint). This is `patient.match`'s entire acceptance criterion.
-- `ScribeService.generate()` always constructs a real `patientHistoryTool` backed by
-  `EncountersRepository.listPriorForPatient()` + `NotesRepository.getLatestPerEncounter()` and
-  passes it into `model.generateSoapNote()` — never populated by request body. `ScribeController
-  .generate()` has **no `@Body()` parameter at all**, so there is no code path for a client to
-  inject prior history even if it tried. `MockModelClient` already calls this tool and changes the
-  Plan text when prior history exists vs. when it's empty (unit-tested in
-  `libs/ai/src/__tests__/mock-provider.test.ts`).
-
-What's missing is **dedicated e2e coverage proving this through the real API**, not new
-implementation — exactly the kind of gap the Tier 0 evaluator pass flagged as a pattern to watch
-for (features that are "accidentally correct" but unverified at the e2e level).
+- Admin dashboard, session/draft persistence, audit query surface — separate sprints
+- Any change to the embedding model, the ICD-10 dataset, or the pgvector index
+- Removing/changing the icd10Codes the AI itself already attaches during generation — this widget
+  only ever adds to that array, never removes from it
 
 ### Done conditions (testable — from feature-list.json acceptance, expanded)
 
-- [ ] Starting an encounter for an existing patient (same first+last+DOB) links to the same
-      `patient_id` as their prior encounter — test: `patient-match.e2e-spec.ts`
-- [ ] A first-time patient (new first+last+DOB) gets a new `patient_id`, distinct from any other
-      patient — test: `patient-match.e2e-spec.ts`
-- [ ] Two patients with different DOBs but the same name are NOT merged (dedup key is the full
-      tuple, not just name) — test: `patient-match.e2e-spec.ts`
-- [ ] For a returning patient, generation output is demonstrably different because prior history
-      was injected (Plan references the prior visit's date/plan) — test: `context-behavior.e2e-spec.ts`
-- [ ] For a first-time patient, generation output shows no prior-visit reference — test:
-      `context-behavior.e2e-spec.ts`
-- [ ] The scribe generate endpoint accepts no request body capable of carrying prior-history data
-      (structural proof, not just behavioral) — test: `context-injection.e2e-spec.ts`
-- [ ] History injection works across providers for the same patient (clinical continuity of care —
-      see invariant note below) but a provider still cannot directly read another provider's
-      encounter record — test: `context-injection.e2e-spec.ts`
+- [ ] `GET /icd10/search?query=...` returns ranked results (code + description + similarity) for a
+      plain-English query, semantically relevant, sourced only from `icd10_codes` — test:
+      `icd10-search.e2e-spec.ts`
+- [ ] The widget accepts plain-English input and renders results with code + description — test:
+      `widget.test.tsx`
+- [ ] Clicking a result appends `{code, description}` to the open note's `icd10Codes` — test:
+      `append.test.tsx`
+- [ ] Appending the same code twice does not create a duplicate entry — test: `append.test.tsx`
+- [ ] The appended code is included in the payload `POST /encounters/:id/notes` sends, so it
+      persists on save (covered by existing `note.save`/`note.versioning_immutable` machinery —
+      no new backend path needed, verify by reading `NotesService.save`'s signature, not by
+      re-testing persistence itself)
 
 ### Invariants that must still hold (AGENTS.md §2)
 
-- [ ] CONTEXT-INJECTION (primary) — prior history via backend tool call only, never client-supplied
-- [ ] TENANT-ISOLATION — **explicit design note, not a violation:** `patientHistoryTool` scopes by
-      `patient_id`, not `provider_id`, so Provider B's generation for a shared patient CAN be
-      informed by Provider A's prior assessment/plan text for that same patient. This is
-      intentional (real clinical continuity of care — any provider treating a patient benefits
-      from their history, same as a real EHR) and distinct from the invariant, which is about
-      direct CRUD access to another provider's *encounter record* (still 403, unaffected). Called
-      out explicitly here so it's defensible in a walkthrough, not discovered as a surprise.
-- [ ] PERSISTENCE — patient/history reads still go through RDS only
+- [ ] CLINICAL-SAFETY — appended codes come only from the real pgvector search (server-side,
+      DB-backed), never client-fabricated; the widget can't inject an arbitrary code string, only
+      a `{code, description}` pair that came back from a real search response
+- [ ] PERSISTENCE — search still hits RDS/pgvector only, no external ICD-10 API
 
 ### Verification plan (how each condition is proven)
 
-- `apps/api/test/patient-match.e2e-spec.ts` — create two encounters with identical patient
-  identity, assert same `patient_id`; create one with a different DOB, assert a different
-  `patient_id`
-- `apps/api/test/context-behavior.e2e-spec.ts` — for the same patient: save a note on encounter 1,
-  create encounter 2 for that patient, generate, assert the Plan text contains the prior visit's
-  date. For a fresh patient: generate on their first encounter, assert the Plan text does NOT
-  reference a prior visit.
-- `apps/api/test/context-injection.e2e-spec.ts` — assert `POST .../scribe/generate` ignores any
-  JSON body sent to it (proving no client-side history injection path exists); assert Provider B
-  generating for a patient Provider A previously saw gets history-informed output, while Provider
-  B still gets 403 trying to `GET` Provider A's encounter directly.
-- `pnpm run verify` green; `pnpm --filter api run test:e2e` all green (existing 29 + new tests)
+- `apps/api/test/icd10-search.e2e-spec.ts` — real query against the seeded 234-code set, assert
+  top result relevance and that no result exists outside `icd10_codes`
+- `apps/web/src/features/icd10/__tests__/widget.test.tsx` — render with a mocked fetch, type a
+  query, assert results render
+- `apps/web/src/features/icd10/__tests__/append.test.tsx` — click a result, assert the `onAppend`
+  callback / resulting note state includes the new code, and that a second click on the same
+  result doesn't duplicate it
+- `pnpm run verify` green; `pnpm --filter api run test:e2e` + `pnpm --filter web run test` all green
 
 ### Definition of done
 
-- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced all 7 live
-      against a running instance (not just via the new tests)
-- [x] `pnpm verify` green (36/36 e2e); _Leave clean_ gate passed
-- [x] `evaluator-rubric.md` scored — 5/7 PASS, 2/7 CONDITIONAL (both flagging the same issue: the
-      TENANT-ISOLATION carve-out below wasn't yet human-confirmed). **Resolved**: presented the
-      exact tradeoff to the user, who confirmed patient-scoped history is intended behavior. Now
-      recorded as a clarified invariant in `AGENTS.md` §2 (TENANT-ISOLATION), not left as an
-      agent's unilateral interpretation.
+- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced search,
+      limit-edge-cases, SQL-injection-safety, and the append/dedup flow live
+- [x] `pnpm verify` green (40/40 e2e, 21/21 web); _Leave clean_ gate passed
+- [x] `evaluator-rubric.md` scored — 6/7 PASS, 1/7 CONDITIONAL. The evaluator found the component
+      tests only exercised `Icd10SearchWidget` via a mocked `search` prop, never the real
+      `icd10Api.search` client — **closed same session**: added
+      `apps/web/src/api/__tests__/icd10.test.ts` (4 tests) exercising the real fetch wiring, URL
+      encoding, default limit, and error propagation. This also surfaced and fixed an unrelated
+      **pre-existing test-environment bug**: Node 25's experimental native `localStorage` global
+      shadows jsdom's, so ANY test touching `api/client.ts` or `state/auth-context.tsx` would have
+      silently failed — nothing had exercised that path before. Fixed in
+      `apps/web/src/test/setup.ts` with an in-memory `Storage` polyfill.
 - [x] `feature-list.json` → `passing` for all three; `progress.md` + `session-handoff.md` updated
