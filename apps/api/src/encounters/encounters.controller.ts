@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { detectRedFlags } from "@scribe/ai";
 import {
   CreateEncounterRequestSchema,
   UpdateEncounterInputRequestSchema,
   type CreateEncounterRequest,
   type Encounter,
+  type RedFlag,
   type UpdateEncounterInputRequest,
 } from "@scribe/shared-types";
 import { CurrentUser, CurrentUserPayload } from "../auth/current-user.decorator";
@@ -46,5 +48,16 @@ export class EncountersController {
   ): Promise<Encounter> {
     const row = await this.encounters.updateInput(id, user, body);
     return toEncounterDto(row);
+  }
+
+  /**
+   * Advisory only — never blocks or alters generation (AGENTS.md [CLINICAL-SAFETY]).
+   * detectRedFlags() is a pure deterministic function, no model call, so there's no
+   * risk of a hallucinated flag.
+   */
+  @Get(":id/red-flags")
+  async getRedFlags(@CurrentUser() user: CurrentUserPayload, @Param("id") id: string): Promise<RedFlag[]> {
+    const encounter = await this.encounters.getForUser(id, user);
+    return detectRedFlags(encounter.transcript ?? "");
   }
 }

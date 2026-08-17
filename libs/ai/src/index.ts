@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./safety";
+export * from "./red-flags";
 export * from "./prompts";
 export { MockModelClient, MockEmbeddingClient } from "./mock-provider";
 export { BedrockModelClient, BedrockEmbeddingClient } from "./bedrock-provider";
