@@ -10,6 +10,7 @@ import { EncountersModule } from "./encounters/encounters.module";
 import { HealthModule } from "./health/health.module";
 import { Icd10Module } from "./icd10/icd10.module";
 import { NotesModule } from "./notes/notes.module";
+import { PatientsModule } from "./patients/patients.module";
 import { ScribeModule } from "./scribe/scribe.module";
 import { TemplatesModule } from "./templates/templates.module";
 
@@ -28,6 +29,7 @@ import { TemplatesModule } from "./templates/templates.module";
     AdminModule,
     TemplatesModule,
     DraftsModule,
+    PatientsModule,
   ],
 })
 export class AppModule {}

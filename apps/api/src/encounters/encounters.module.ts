@@ -7,6 +7,6 @@ import { EncountersService } from "./encounters.service";
 @Module({
   controllers: [EncountersController],
   providers: [EncountersService, EncountersRepository, PatientsRepository],
-  exports: [EncountersService, EncountersRepository],
+  exports: [EncountersService, EncountersRepository, PatientsRepository],
 })
 export class EncountersModule {}

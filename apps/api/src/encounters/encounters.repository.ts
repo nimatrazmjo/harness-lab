@@ -80,6 +80,17 @@ export class EncountersRepository {
     return result.rows;
   }
 
+  /** Every encounter for a patient, oldest first — chronological order for a bulk export.
+   * Callers must apply their own tenant-isolation filter (see `selectEncountersForExport`);
+   * this returns every provider's encounters for the patient, unfiltered. */
+  async listForPatient(patientId: string): Promise<EncounterRow[]> {
+    const result = await this.pool.query<EncounterRow>(
+      `SELECT * FROM encounters WHERE patient_id = $1 ORDER BY created_at ASC`,
+      [patientId],
+    );
+    return result.rows;
+  }
+
   /** Returns prior encounters for the same patient, most recent first, excluding the current one. */
   async listPriorForPatient(patientId: string, excludeEncounterId: string): Promise<EncounterRow[]> {
     const result = await this.pool.query<EncounterRow>(

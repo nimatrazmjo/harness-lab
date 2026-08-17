@@ -27,6 +27,12 @@ export class ProvidersRepository {
     return result.rows[0] ?? null;
   }
 
+  async findByIds(ids: string[]): Promise<ProviderRow[]> {
+    if (ids.length === 0) return [];
+    const result = await this.pool.query<ProviderRow>("SELECT * FROM providers WHERE id = ANY($1::uuid[])", [ids]);
+    return result.rows;
+  }
+
   async create(input: { email: string; passwordHash: string; name: string; role: Role }): Promise<ProviderRow> {
     const result = await this.pool.query<ProviderRow>(
       `INSERT INTO providers (email, password_hash, name, role) VALUES ($1, $2, $3, $4) RETURNING *`,
