@@ -2,12 +2,24 @@
 
 _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session protocol._
 
+## Read this before anything else
+
+`clean-state-checklist.md` now gates both ends of every session — run its **Start clean** section
+before touching anything. `sprint-contract.md` must be filled in (fresh, for the feature you're
+about to work) BEFORE writing code; `evaluator-rubric.md` must score the work PASS/CONDITIONAL
+AFTER, ideally by a **separate subagent** (`Agent` tool, non-fork, general-purpose) that didn't
+write the code — self-grading skews positive, this was proven out this session.
+
 ## Where things stand
 
-Tier 0 (the airtight core) is **code-complete, fully tested, and manually browser-verified**:
-15/17 passing, 2 `blocked` on real AWS account access (not something an agent can do unattended —
-see `infra/DEPLOY.md`). Tier 1 hasn't been started yet, though a few pieces already exist as a
-side effect of building Tier 0 correctly (see "Tier 1 head start" below).
+Tier 0 (the airtight core) is **code-complete, fully tested, manually browser-verified, AND
+independently evaluated**: 15/17 passing, 2 `blocked` on real AWS account access (not something an
+agent can do unattended — see `infra/DEPLOY.md`). A fresh evaluator subagent scored it PASS on all
+7 `evaluator-rubric.md` dimensions (see that file's Output section for the full evidence trail) —
+it found one non-blocking test-coverage gap, which was closed the same session
+(`apps/api/test/edge-no-content.e2e-spec.ts`), which also legitimately flips Tier 1's
+`edge.no_clinical_content` to `passing`. Tier 1 is otherwise unstarted, though a few pieces already
+exist as a side effect of building Tier 0 correctly (see "Tier 1 head start" below).
 
 ## Environment (must-know before touching anything)
 
@@ -79,4 +91,13 @@ side effect of building Tier 0 correctly (see "Tier 1 head start" below).
 ## Next feature to work
 
 Pick up at Tier 1, top-down per `feature-list.json`: `patient.match` first (cheapest — mostly
-already implemented, just needs its test).
+already implemented, just needs its test). `edge.no_clinical_content` is now `passing` (closed
+this session, see progress.md's newest entry) — don't re-do it.
+
+**Before writing any code:** overwrite `sprint-contract.md`'s Active sprint section for
+`patient.match` — state the Done conditions as testable checks. **After the code is green:**
+launch a fresh `Agent` (subagent_type omitted or `general-purpose`, NOT `fork` — it must not
+inherit your context) to score it against `evaluator-rubric.md`. See the prompt used for the Tier 0
+evaluation in this session's transcript / `git log -p` on the `docs: retroactive sprint-contract...`
+commit for a template of what to hand that subagent (repo path, branch, port conventions — 5433 for
+Postgres, avoid 3000, use a scratch port like 3002 for manual HTTP probing).

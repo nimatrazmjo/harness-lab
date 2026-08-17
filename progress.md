@@ -14,9 +14,15 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** Tier 0 core loop is code-complete and verified. Ready to start Tier 1.
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 0 / 16 passing   ·   **Tier 2:** 0 / 4 passing
-- **Next feature:** first Tier 1 item, e.g. `patient.match` (mostly already true via `PatientsRepository.findOrCreate` dedup — write the dedicated test) or `icd10.search_widget`.
+- **Active phase:** Tier 0 core loop is code-complete, verified, and independently evaluated
+  (PASS, all 7 rubric dimensions — see `evaluator-rubric.md`). Ready to start Tier 1.
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 1 / 16 passing (`edge.no_clinical_content`)   ·   **Tier 2:** 0 / 4 passing
+- **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
+  (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
+  ideally by a fresh subagent) are now part of the session protocol — see AGENTS.md §1/§5/§11.
+- **Next feature:** overwrite `sprint-contract.md` for the next sprint first — `patient.match`
+  (mostly already true via `PatientsRepository.findOrCreate` dedup — write the dedicated test) or
+  `icd10.search_widget`.
 - **Environment:** local bootstrap via `pnpm setup` (`tools/init.sh` → docker-compose Postgres+pgvector on host port **5433** — 5432 is occupied by an unrelated older project on this machine, `~/workstation/ai-clinical-scribe`, don't touch it). `AI_PROVIDER=mock` by default (deterministic, no network calls) — real Bedrock wiring exists in `libs/ai/src/bedrock-provider.ts` but is untested (no AWS creds in this environment).
 - **Open decisions:** none outstanding — raw `pg` + `node-pg-migrate` (not an ORM), zod validation via a custom `ZodValidationPipe`, plain CSS (no UI framework).
 - **Blockers:** `infra.rds_postgres_private` and `infra.ec2_nginx_tls` require an actual AWS account/credentials to provision EC2 + RDS — cannot be done by an agent unattended (see `infra/DEPLOY.md`). Everything code/config-side for both (migrations, nginx.conf, IAM notes, TLS verify script) is ready; only the real cloud provisioning step is outstanding.
@@ -24,6 +30,29 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — Harness gates adopted; Tier 0 independently evaluated (PASS)
+- User added `clean-state-checklist.md`, `sprint-contract.md`, `evaluator-rubric.md` and updated
+  `AGENTS.md`'s session protocol / definition-of-done to require them.
+- Ran the Start-clean gate against the existing Tier 0 branch: `pnpm verify` green, `/health` OK
+  through the pool, migrations current, no committed secrets — baseline confirmed green before
+  any new work.
+- Filled `sprint-contract.md` retroactively for the already-completed Tier 0 sprint (it predates
+  these files), then launched a **fresh subagent with no authorship context** as the evaluator
+  (per the rubric's own instruction to separate evaluator from generator). It re-ran `pnpm verify`
+  and the e2e suite itself, probed tenant isolation and the clinical-safety gate with its own curl
+  commands against a live instance, and checked `note_versions` directly in Postgres for
+  immutability — did not trust any of the generator's claims.
+- **Verdict: PASS on all 7 dimensions**, no blocking issues. One non-blocking gap: no HTTP-level
+  e2e test for garbage input on the live `/scribe/generate` route (only unit-tested at
+  `hasClinicalContent()`). Closed same-session:
+  `apps/api/test/edge-no-content.e2e-spec.ts` (2 new tests, both green) — this also genuinely
+  satisfies `edge.no_clinical_content` (Tier 1), flipped to `passing`.
+- `pnpm --filter api run test:e2e` now 29/29 (was 27/27); `pnpm verify` still exits 0 across all
+  4 packages.
+- **Next:** pick the next Tier 1 feature, write its `sprint-contract.md` first.
+
+---
 
 ### 2026-08-17 — Tier 0 core loop built, tested, and browser-verified
 - Built the full monorepo from the harness scaffold: `apps/api` (NestJS, raw `pg` pool, JWT auth,
