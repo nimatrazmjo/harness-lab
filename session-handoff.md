@@ -34,9 +34,13 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 - **Tier 1: COMPLETE — 16/16 passing.** Every item independently evaluated PASS or an accepted
   CONDITIONAL, and every CONDITIONAL was closed same-session before being marked done. No
   outstanding debt.
-- **Tier 2**: 0/4, not started. Per `docs/PRODUCT.md`: pick "one or two, done well" — not a
-  checklist to complete. `pioneer.version_diff` is the cheapest (immutable versions already exist,
-  it's a read-only diff view over `note_versions`).
+- **Tier 2: 1/4 passing** — `pioneer.version_diff` done (entirely frontend, hand-rolled LCS diff
+  in `apps/web/src/features/note/diff.ts`, `VersionDiff.tsx`, compare dropdowns in
+  `EncounterWorkspacePage`). Independently evaluated 7/7 PASS, including the evaluator writing its
+  own adversarial test cases against the diff algorithm (not just trusting the existing suite).
+  Per `docs/PRODUCT.md`: Tier 2 is "one or two, done well," not a checklist — remaining items are
+  being attempted per an explicit "continue to finish everything" instruction from the user this
+  session, not because they're required.
 - **TENANT-ISOLATION clarified** (2026-08-17): `AGENTS.md` §2 states a patient's clinical history
   CAN cross providers (continuity of care); direct access to another provider's *encounter
   record* stays 403. Settled.

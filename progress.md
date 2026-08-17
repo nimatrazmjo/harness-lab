@@ -14,16 +14,16 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** **Tier 1 is complete (16/16).** Tier 0 core loop + all 5 Tier 1 sprints
-  code-complete, verified, and independently evaluated PASS.
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 16 / 16 passing   ·   **Tier 2:** 0 / 4 passing
+- **Active phase:** Tier 1 complete (16/16). First Tier 2 pioneer feature
+  (`pioneer.version_diff`) also code-complete, verified, and independently evaluated PASS.
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 16 / 16 passing   ·   **Tier 2:** 1 / 4 passing (`pioneer.version_diff`)
 - **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
   (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
   ideally by a fresh subagent) are part of the session protocol — see AGENTS.md §1/§5/§11.
-- **Next feature:** no more Tier 1 work. Options: a Tier 2 "pioneer" feature (per
-  `docs/PRODUCT.md`, pick one or two, done well — version diff view is the cheapest given
-  immutable versions already exist), or return to `infra.rds_postgres_private`/
-  `infra.ec2_nginx_tls` if real AWS access ever becomes available.
+- **Next feature:** per `docs/PRODUCT.md`, Tier 2 is "one or two, done well" — not a checklist to
+  complete. Remaining: `pioneer.red_flags` (moderate — real detection pass, advisory only),
+  `pioneer.writing_style` (hard to make genuinely real with the mock model), `pioneer.bulk_pdf`
+  (new PDF-generation dependency).
 - **Environment:** local bootstrap via `pnpm setup` (`tools/init.sh` → docker-compose Postgres+pgvector on host port **5433** — 5432 is occupied by an unrelated older project on this machine, `~/workstation/ai-clinical-scribe`, don't touch it). `AI_PROVIDER=mock` by default (deterministic, no network calls) — real Bedrock wiring exists in `libs/ai/src/bedrock-provider.ts` but is untested (no AWS creds in this environment).
 - **Open decisions:** none outstanding — raw `pg` + `node-pg-migrate` (not an ORM), zod validation via a custom `ZodValidationPipe`, plain CSS (no UI framework).
 - **Blockers:** `infra.rds_postgres_private` and `infra.ec2_nginx_tls` require an actual AWS account/credentials to provision EC2 + RDS — cannot be done by an agent unattended (see `infra/DEPLOY.md`). Everything code/config-side for both (migrations, nginx.conf, IAM notes, TLS verify script) is ready; only the real cloud provisioning step is outstanding.
@@ -31,6 +31,27 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — pioneer.version_diff (PASS) — first Tier 2 feature
+- Entirely frontend, zero backend changes — `note.version_history`'s existing endpoint already
+  returns full version content. Wrote a hand-rolled LCS line-diff (`apps/web/src/features/note/
+  diff.ts`) rather than pulling in a diff library, consistent with this frontend's zero-extra-
+  dependency approach. `VersionDiff.tsx` renders it per SOAP section plus an ICD-10 code diff;
+  two `<select>` dropdowns in the workspace let a provider pick any two saved versions.
+- Manually verified live: saved two versions of a real note with a deliberate one-line Plan edit,
+  selected both in the compare dropdowns, and got an exact red/green line diff on just the Plan,
+  with Subjective/Objective/Assessment/ICD-10 correctly tagged `(unchanged)`.
+- Independent evaluator: **7/7 PASS**, no CONDITIONALs. It specifically stress-tested the
+  hand-rolled diff algorithm itself with its own adversarial cases (disjoint text, empty inputs,
+  repeated-line patterns, a 1-char change in a long line, whitespace-only diffs) — all correct.
+  Flagged one documented, accepted edge case (not a bug): the ICD-10 diff keys purely by code, so
+  a changed description on the same code would show as "unchanged" — acceptable since codes are
+  canonical in real data.
+- `pnpm --filter web run test` now 30/30 (was 21).
+- **Next:** per `docs/PRODUCT.md`, Tier 2 is optional — "one or two, done well." Continuing to
+  `pioneer.red_flags` next.
+
+---
 
 ### 2026-08-17 — audit.trail (PASS) — Tier 1 complete (16/16)
 - Last open Tier 1 item. `AuditService.log()`/`listAll()` already existed from Tier 0 (only

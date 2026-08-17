@@ -61,27 +61,25 @@ model choice, schema, streaming approach, VPC/secrets. If it can't be explained,
 _Prior sprints' scorecards are preserved in git history (search commit messages for
 "docs: record evaluator pass"). This section holds the latest sprint only._
 
-**Sprint:** `audit.trail` (the last Tier 1 item) · **Overall: PASS** (6/7 PASS, 1 CONDITIONAL,
-closed same session)
+**Sprint:** `pioneer.version_diff` (first Tier 2 pioneer feature) · **Overall: PASS** (7/7, no
+CONDITIONALs)
 
-Evaluated 2026-08-17 by a fresh subagent with no authorship context. Diffed scope:
-`audit.service.ts` (filtering + provider-name join), `admin.mapper.ts`/`audit.mapper.ts` (new),
-call sites added in `admin.service.ts` (create/deactivate) and `templates.controller.ts`
-(create/update/delete), a new `GET /admin/audit-logs` route, `audit.ts` shared schema, and
-`audit.e2e-spec.ts`. `notes.service.ts` (Tier 0's existing `note.save` logging) untouched.
+Evaluated 2026-08-17 by a fresh subagent with no authorship context. Diffed scope: entirely
+`apps/web` — `diff.ts` (new, hand-rolled LCS line-diff, no external dependency), `VersionDiff.tsx`
+(new), `__tests__/diff.test.tsx` (new, 9 tests), compare-dropdown wiring in
+`EncounterWorkspacePage.tsx`, presentational CSS. Zero backend/`libs/` changes.
 
-| #   | Dimension             | Verdict     | Evidence / why |
-| --- | ---------------------- | ----------- | -------------- |
-| 1   | Contract fulfillment  | PASS        | All 8 Done conditions reproduced live, independent of the test suite: provider create/deactivate each wrote the right audit row; template create/update/delete wrote 3 rows in the correct order with correct `target_id`; `GET /admin/audit-logs` returned newest-first with actor identity; the `action` filter and the `from`/`to` date-range filter (`?from=<tomorrow>` → 0 rows, `?from=<today>` → matches) both genuinely filter, not no-ops; non-admin got 403; a note saved with PHI-laden content left zero trace in `metadata` (only `{versionNumber}`); a provider created with a real password left zero trace of it in the raw `audit_logs.metadata` column, checked via psql. |
-| 2   | Correctness           | PASS        | Live curl + direct `psql` against the real Postgres container throughout, not inferred from the test suite. |
-| 3   | Invariants (§2)       | PASS        | SECRETS: confirmed via raw DB query, not API response shape, that no password or PHI ever reaches `metadata` across both the new admin-action logging and the pre-existing note-save logging. TENANT-ISOLATION: `GET /admin/audit-logs` sits under the same class-level `@Roles('admin')` gate as the rest of `AdminController`. PERSISTENCE: reuses the pre-existing `audit_logs` table and the shared `PG_POOL`, no new migration. Grepped for any `UPDATE`/`DELETE` on `audit_logs` — none exist; the contract's "append-only in spirit, not a formal AGENTS.md invariant for this table" framing was checked and found honest, not overclaimed. |
-| 4   | Verification quality  | CONDITIONAL | The sprint's own verification plan claimed `audit.e2e-spec.ts` covered all Done conditions, but date-range filtering — an explicit Done condition — had no automated test, only the `action` filter did. The evaluator verified date-range filtering worked correctly live, so this was a coverage gap, not a bug. **Closed same session**: added a `filters by date range` test (8th test in the file). |
-| 5   | No regressions        | PASS        | `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 76/76 at evaluation time (69 prior + 7 new), now 77/77 after the follow-up test. |
-| 6   | Scope discipline      | PASS        | `git status` confined to audit call sites + new audit files + the test file; no changes to encounters, drafts, or any prior sprint's code. |
-| 7   | Explainability        | PASS        | `@Global()` `AuditModule` correctly explains why no new module imports were needed; `LEFT JOIN providers` for `actorName` is the minimal-cost way to satisfy "actor identity"; metadata scoping (structural facts only, consistently applied across all 5 call sites) is a clean, defensible pattern. |
+| #   | Dimension             | Verdict | Evidence / why |
+| --- | ---------------------- | ------- | -------------- |
+| 1   | Contract fulfillment  | PASS    | All 5 Done conditions reproduced live in a real browser (not just via the suite): a genuine Plan edit across two saved versions produced an exact removed/added line pair, unchanged sections tagged `(unchanged)`, v1-vs-v1 rendered a clean no-op diff. |
+| 2   | Correctness           | PASS    | Ran the real API+web against local Postgres, logged in, drove the two `<select>` compare dropdowns via the DOM, screenshotted the resulting diff — matched the actual saved edit exactly. |
+| 3   | Invariants (§2)       | PASS    | VERSION-IMMUTABILITY: confirmed by reading the code that `diff.ts`/`VersionDiff.tsx` only ever read `NoteVersion.note.*`, make no API calls, and write nothing back to `note_versions`. |
+| 4   | Verification quality  | PASS    | Read the full test file — assertions check real diff content (specific added/removed lines), not "rendered without crashing." Separately wrote and ran its OWN adversarial test cases against the raw `diffLines` algorithm (deleted after, not left in the repo): disjoint text, both/either input empty, a repeated-line pattern (`a/b/a/b/a` vs `a/b/a`), a 1-character change in a long single line, and whitespace-only differences — all produced correct, coherent output, confirming the hand-rolled LCS isn't just passing on easy cases. |
+| 5   | No regressions        | PASS    | `pnpm run verify` → exit 0. `pnpm --filter web run test` → 30/30 (21 prior + 9 new), exact match. |
+| 6   | Scope discipline      | PASS    | Diff confined entirely to `apps/web` + `sprint-contract.md`; zero touches to `apps/api` or `libs/`. |
+| 7   | Explainability        | PASS    | The LCS backtrack tie-break is standard and defensible; the ICD-10 diff is a straightforward set-diff keyed on code, matching the contract's stated scope. One documented edge case (not a bug): a code appearing in both versions with a changed description shows as "unchanged" with the new description — the contract itself states this is acceptable since ICD-10 codes are canonical and don't change meaning independently of the code. |
 
-**Required fixes before closing:** none remaining — the one flagged gap (date-range filter test)
-was closed in the same session, before this sprint was marked done.
+**Required fixes before closing:** none.
 
 **Only when Overall is PASS (or an accepted CONDITIONAL):** flip `feature-list.json` → `passing`,
 then update `progress.md` and `session-handoff.md`.

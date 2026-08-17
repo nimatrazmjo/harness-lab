@@ -646,7 +646,7 @@
       "id": "pioneer.version_diff",
       "tier": 2,
       "title": "Pioneer: version diff view",
-      "status": "failing",
+      "status": "passing",
       "description": "A diff view between note versions so providers can see exactly what changed. Cheap to add given immutable versions already exist.",
       "acceptance": [
         "Provider can select two versions and see a highlighted diff.",
