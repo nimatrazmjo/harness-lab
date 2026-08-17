@@ -17,82 +17,97 @@ goalposts or drift into adjacent work — the two most common ways an agent fake
 
 ## Active sprint
 
-**Feature(s):** `pioneer.red_flags` (Tier 2 — second pioneer feature)
-**Goal (one sentence):** Before generating a note, a provider sees a clearly advisory (never
-blocking) list of clinical red-flag terms detected in the transcript, computed deterministically
-server-side — no AI model call, no fabrication risk.
-**Tier:** 2 · **Branch:** `feat/red-flags`
+**Feature(s):** `pioneer.writing_style` (Tier 2 — third pioneer feature)
+**Goal (one sentence):** A provider's own past edits to their saved notes teach the system a
+small, concrete terminology preference, which is then demonstrably applied server-side to their
+next generated note — without a real LLM, so this has to be a deterministic, evidence-based
+mechanism, not a hand-wave.
 
-### In scope (only these)
+**Tier:** 2 · **Branch:** `feat/writing-style`
 
-- `libs/ai/src/red-flags.ts` — a pure, deterministic keyword/phrase detector (same style as the
-  existing `safety.ts`'s `hasClinicalContent`): scans transcript text for a curated set of
-  clinically meaningful red-flag terms (chest pain radiating to arm/jaw, sudden severe/"worst"
-  headache, loss of consciousness, suicidal/homicidal ideation, signs of stroke, anaphylaxis,
-  severe bleeding, difficulty breathing, seizure, overdose) and returns matched flags with a
-  human-readable message — no LLM call, so no risk of a hallucinated flag
-- Backend: `GET /encounters/:id/red-flags` — tenant-scoped like every other encounter route,
-  reads the encounter's current transcript, runs the detector, returns matches
-- **Frontend wiring in scope** even though only a backend test path is listed — "surfaced to the
-  provider before generation" is inherently frontend-observable, same reasoning as the draft-
-  persistence sprint. Flags render as a clearly-advisory banner above the Generate button; the
-  button itself is never disabled or blocked by a flag being present
-- `apps/api/test/red-flags.e2e-spec.ts`
+### The concrete mechanism (decided up front, so this can't drift into hand-waving mid-sprint)
+
+`MockModelClient` always synthesizes the same boilerplate for a given input — it has no free-form
+authorial voice to imitate. What a provider actually controls is what they keep vs. edit before
+saving (human-in-the-loop, `note_versions` is the record of that). So "writing-style learning"
+here means: **learn whether this provider tends to abbreviate "patient" to "pt" in what they
+save, and if so, apply that abbreviation to their next generated note.**
+
+- `libs/ai/src/writing-style.ts` — pure function `inferWritingStyle(samples: { subjective:
+  string; plan: string }[]): WritingStyleProfile` (`WritingStyleProfile = { patientTerm: "pt" |
+  "patient" }`). Counts whole-word, case-insensitive occurrences of "pt" vs "patient" across the
+  samples' subjective+plan text. Returns `"pt"` only if `ptCount >= patientCount + 2 AND ptCount
+  >= 3` (a real, repeated pattern — not one edit); otherwise `"patient"` (the neutral default,
+  identical to today's unadapted output). Same style as `red-flags.ts`/`safety.ts`: no LLM call,
+  fully deterministic, unit-testable in isolation.
+- `apps/api/src/notes/notes.repository.ts` — add `getRecentByAuthor(authorId, limit=10):
+  Promise<Pick<NoteVersionRow, "subjective" | "plan">[]>`, most-recent-first, across all of that
+  provider's encounters (their own saved history only — no cross-provider reads).
+- `apps/api/src/scribe/scribe.service.ts` — before calling the model, fetch the current user's
+  recent saved versions via the new repo method, run `inferWritingStyle`, pass the result as
+  `writingStyle` on `GenerateSoapNoteInput` (same pattern as `templateApplied`).
+- `libs/ai/src/mock-provider.ts` — after assembling `subjective`/`objective`/`assessment`/`plan`,
+  if `writingStyle.patientTerm === "pt"`, apply `\bPatient\b` → `Pt`, `\bpatient\b` → `pt` across
+  all four sections. No-op (byte-identical output) when the profile is `"patient"` — the default,
+  so a provider with no/thin history sees exactly today's output, unchanged.
+- `libs/ai/src/types.ts` — add `WritingStyleProfile` export, `writingStyle?: WritingStyleProfile`
+  on `GenerateSoapNoteInput`.
+- `apps/api/test/writing-style.e2e-spec.ts` (already named in `feature-list.json`).
 
 ### Explicitly OUT of scope (do not touch this sprint)
 
-- Any change to the generation pipeline itself (`ScribeService`, `MockModelClient`) — red flags
-  are informational only, computed independently of and before generation, never injected into
-  the prompt or altering output
-- Blocking or gating "Generate note" on flags being reviewed/dismissed — acceptance explicitly
-  requires advisory-only
-- Any other Tier 2 pioneer feature
+- Any change to `templateApplied` behavior, red-flag detection, or any other existing generation
+  input — this adds one new optional input, nothing else changes shape.
+- Any attempt to "learn" sentence structure, tone, or content ordering — out of reach for a
+  deterministic mock model; the abbreviation-preference mechanism above is the sprint's full
+  scope, not a first step toward something broader.
+- Any new frontend UI to show/explain the learned style — acceptance only requires the adaptation
+  be "demonstrable," which the e2e test covers; no UI surface is named in acceptance.
+- Cross-provider learning of any kind — a provider's style profile is derived only from their own
+  saved history (their own `author_id` rows), never another provider's.
+- The tracked cross-cycle autosave race from the `pioneer.red_flags` sprint — separate, pre-
+  existing, needs its own contract.
 
 ### Done conditions (testable — from feature-list.json acceptance, expanded)
 
-- [ ] A transcript containing a red-flag phrase (e.g. "worst headache of my life") returns that
-      flag from `GET /encounters/:id/red-flags` — test: `red-flags.e2e-spec.ts`
-- [ ] A transcript with no red-flag content returns an empty list, not a false positive — test:
-      `red-flags.e2e-spec.ts`
-- [ ] Multiple distinct red flags in one transcript are all returned, not just the first match —
-      test: `red-flags.e2e-spec.ts`
-- [ ] The endpoint is tenant-scoped — another provider gets 403 — test: `red-flags.e2e-spec.ts`
-- [ ] Detected flags are never sent to or used by the generation pipeline — code-review check:
-      `ScribeService`/`MockModelClient` remain untouched by this diff
-- [ ] Flags render in the UI as advisory, and "Generate note" remains clickable regardless —
-      manual browser verification, since no frontend test path is required
+- [ ] A provider whose last ≥3 saved notes prefer "pt" over "patient" (by the threshold above)
+      gets a newly generated note using "Pt" instead of "Patient" — test: `writing-style.e2e-spec.ts`
+- [ ] A provider with no saved history, or whose history doesn't clear the threshold, gets
+      unchanged output (byte-identical to pre-sprint generation) — test: `writing-style.e2e-spec.ts`
+- [ ] The style profile is computed fresh server-side per generation call from that provider's own
+      `note_versions` rows — never client-supplied, never cached stale across a session — test:
+      `writing-style.e2e-spec.ts` (two generations for the same provider after their history
+      changes produce different output)
+- [ ] `inferWritingStyle` unit-tested directly: below-threshold sample counts stay `"patient"`,
+      at-threshold flips to `"pt"`, empty sample list stays `"patient"` — test:
+      `libs/ai/src/__tests__/writing-style.test.ts`
+- [ ] A provider's style is never influenced by another provider's saved notes — test:
+      `writing-style.e2e-spec.ts` (tenant-isolation-shaped assertion on the profile source)
 
 ### Invariants that must still hold (AGENTS.md §2)
 
-- [ ] CLINICAL-SAFETY — flags are advisory, human-in-the-loop; never auto-fabricate or auto-act
-- [ ] TENANT-ISOLATION — same gate as every other encounter-scoped route
-- [ ] CONTEXT-INJECTION — irrelevant here (this feature adds no new AI-model call), but worth
-      stating explicitly: red-flag detection must stay a pure deterministic function, not become a
-      second model call that could itself fabricate a flag
+- [ ] CLINICAL-SAFETY — this changes terminology only, never clinical facts/content; provider
+      still reviews and can edit before save (human-in-the-loop unchanged)
+- [ ] TENANT-ISOLATION — a provider's learned style derives only from their own `author_id` rows
+- [ ] CONTEXT-INJECTION — the style profile is fetched and computed server-side inside
+      `ScribeService`, same as `patientHistoryTool`/`templateInstructions` — never client-supplied
+- [ ] PERSISTENCE — no new table; reuses existing `note_versions` (already RDS-durable)
 
 ### Verification plan (how each condition is proven)
 
-- `apps/api/test/red-flags.e2e-spec.ts`
-- `libs/ai/src/__tests__/red-flags.test.ts` — unit coverage on the detector itself (true positive,
-  true negative, multiple matches, case-insensitivity)
-- Manual browser walkthrough: type a red-flag transcript, confirm the advisory banner appears and
-  Generate note stays enabled
+- `libs/ai/src/__tests__/writing-style.test.ts` — unit coverage on `inferWritingStyle` in isolation
+- `apps/api/test/writing-style.e2e-spec.ts` — seeds real saved `note_versions` rows (via the
+  existing save-note flow, not direct DB inserts, so it exercises the real path) for two
+  providers with different histories, generates a new note for each, asserts the terminology
+  difference in the real SSE output
 - `pnpm run verify` green; `pnpm --filter api run test:e2e` + `pnpm --filter @scribe/ai run test`
   all green
+- Manual browser walkthrough: save a few notes with "Pt" phrasing for a real seeded provider,
+  generate a new note, confirm "Pt" appears without having to inspect the DB
 
 ### Definition of done
 
-- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced flag
-      detection, tenant isolation, and the "advisory not blocking" UI behavior live, then wrote
-      its own adversarial pattern-matching test cases against `detectRedFlags`
-- [x] `pnpm verify` green (82/82 API e2e, 27/27 `libs/ai` unit); _Leave clean_ gate passed
-- [x] `evaluator-rubric.md` scored — **Overall: CONDITIONAL**, not a clean PASS. Two required
-      fixes: `difficulty-breathing` didn't match its own literal phrase; `seizure`/`convulsion`
-      patterns missed plural forms. **Both closed same session** (regex fixes + 5 new regression
-      tests). Also fixed the two non-blocking recommendations (multiline gap matching; documented
-      the deliberate no-negation-detection design choice).
-- [x] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated. **A separate,
-      pre-existing bug the evaluator found while testing this sprint (a cross-cycle autosave race
-      in `EncounterWorkspacePage`'s transcript-save debounce, present since Tier 0, NOT introduced
-      by this sprint) is tracked as its own follow-up in `progress.md` — it touches core Tier 0/1
-      code and deserves its own contract, not a drive-by fix bundled into a Tier 2 pioneer sprint.**
+- [ ] Every _Done condition_ checked with evidence
+- [ ] `pnpm verify` green; _Leave clean_ gate passed
+- [ ] `evaluator-rubric.md` scored by a separate subagent
+- [ ] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated
