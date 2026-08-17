@@ -11,13 +11,14 @@
 
 > **Session protocol — every agent, every session:**
 >
-> 1. **Resume:** read `session-handoff.md` first — it says exactly where the last session stopped.
+> 1. **Resume & verify baseline:** read `session-handoff.md`, then run the _Start clean_ gate in
+>    `clean-state-checklist.md` — the baseline must be green before you build on it.
 > 2. **Orient:** skim `progress.md` (where we've been), `docs/PRODUCT.md` + `docs/ARCHITECTURE.md`
 >    (what/why + how), and `feature-list.json` (what's next).
 > 3. **Work** the next `failing` feature (see §5), or resume the in-flight one from the handoff.
-> 4. **Hand off:** before ending (or when context runs low), **overwrite** `session-handoff.md`
->    with the current snapshot, prepend a dated entry to `progress.md`, and flip any finished
->    feature's `status`.
+> 4. **Hand off:** run the _Leave clean_ gate in `clean-state-checklist.md`, then **overwrite**
+>    `session-handoff.md` with the current snapshot, prepend a dated entry to `progress.md`, and
+>    flip any finished feature's `status`.
 
 ---
 
@@ -86,7 +87,10 @@ AGENTS.md          # this file — the harness contract (source of truth)
 CLAUDE.md          # one-line bridge: imports AGENTS.md for Claude Code
 progress.md        # rolling log: durable, append-only history (append at session end)
 session-handoff.md # warm baton-pass: overwritten each session, read first to resume
+clean-state-checklist.md # start-clean / leave-clean gates run at both ends of a session
 feature-list.json  # the prioritized, tier-ordered source of truth (work top-down)
+sprint-contract.md # per-feature "done" agreed BEFORE coding (prevents scope drift)
+evaluator-rubric.md # adversarial scorecard applied AFTER coding (separate eval pass)
 ```
 
 **Context files (read at session start, keep current):** `session-handoff.md` (where we STOPPED —
@@ -122,6 +126,9 @@ verbose.**
   finished_ beats a complete build with sloppy infra.
 - One feature at a time: pick the next `failing` feature → implement the thinnest vertical
   slice → make its acceptance tests pass → flip it to `passing` → commit.
+- **Contract before code, evaluate after:** at sprint start fill `sprint-contract.md` (the
+  testable "done" for this feature); at sprint end score the work against `evaluator-rubric.md` —
+  ideally in a _separate_ evaluation pass, since an agent grading its own fresh work skews positive.
 - Branch + PR per feature. **Never commit to `main`.** Conventional commit messages.
 - Schema changes go through a migration (`pnpm db:migrate`). Never hand-edit the DB or a
   generated migration after it's applied.
@@ -202,11 +209,12 @@ isolation "works."
 
 ## 11. Definition of done (per feature)
 
-1. Acceptance criteria in `feature-list.json` are met.
+1. All `sprint-contract.md` _Done conditions_ are checked **with evidence**.
 2. Its tests pass and `pnpm verify` exits 0.
 3. No invariant in §2 is violated.
-4. `status` flipped to `passing` in `feature-list.json` and committed on a branch/PR.
-5. `progress.md` updated — a dated entry with what changed and the next feature.
+4. `evaluator-rubric.md` scored **PASS** (or an accepted CONDITIONAL) — ideally a separate pass.
+5. `status` flipped to `passing` in `feature-list.json` and committed on a branch/PR.
+6. `progress.md` updated — a dated entry with what changed and the next feature.
 
 ---
 
