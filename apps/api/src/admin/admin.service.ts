@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AdminEncounterFilter, CreateProviderRequest } from "@scribe/shared-types";
+import { AuditService } from "../audit/audit.service";
 import { AuthService } from "../auth/auth.service";
 import { ProviderRow, ProvidersRepository } from "../auth/providers.repository";
 import { EncounterRow, EncountersRepository } from "../encounters/encounters.repository";
@@ -9,6 +10,7 @@ export class AdminService {
   constructor(
     private readonly encounters: EncountersRepository,
     private readonly providers: ProvidersRepository,
+    private readonly audit: AuditService,
   ) {}
 
   /** Admin-only cross-provider view (AGENTS.md [TENANT-ISOLATION]: bypass only through this
@@ -17,12 +19,26 @@ export class AdminService {
     return this.encounters.listAll(filter);
   }
 
-  async createProvider(dto: CreateProviderRequest): Promise<ProviderRow> {
+  async createProvider(actorId: string, dto: CreateProviderRequest): Promise<ProviderRow> {
     const existing = await this.providers.findByEmail(dto.email);
     if (existing) throw new ConflictException("A provider with this email already exists");
 
     const passwordHash = await AuthService.hashPassword(dto.password);
-    return this.providers.create({ email: dto.email, passwordHash, name: dto.name, role: dto.role });
+    const created = await this.providers.create({
+      email: dto.email,
+      passwordHash,
+      name: dto.name,
+      role: dto.role,
+    });
+    // Metadata carries only structural facts — never the password (AGENTS.md [SECRETS]).
+    await this.audit.log({
+      actorId,
+      action: "admin.provider.create",
+      targetType: "provider",
+      targetId: created.id,
+      metadata: { email: created.email, role: created.role },
+    });
+    return created;
   }
 
   async listProviders(): Promise<ProviderRow[]> {
@@ -33,9 +49,16 @@ export class AdminService {
    * on their next authenticated request (JwtStrategy re-checks is_active per request), not
    * immediately and not by revoking anything already in flight. Draft/encounter data is
    * untouched and remains readable (by the provider once reactivated, or by an admin). */
-  async deactivateProvider(id: string): Promise<void> {
+  async deactivateProvider(actorId: string, id: string): Promise<void> {
     const provider = await this.providers.findById(id);
     if (!provider) throw new NotFoundException("Provider not found");
     await this.providers.setActive(id, false);
+    await this.audit.log({
+      actorId,
+      action: "admin.provider.deactivate",
+      targetType: "provider",
+      targetId: id,
+      metadata: { email: provider.email },
+    });
   }
 }

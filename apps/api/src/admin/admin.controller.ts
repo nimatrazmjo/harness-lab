@@ -1,12 +1,17 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import {
   AdminEncounterFilterSchema,
+  AuditLogFilterSchema,
   CreateProviderRequestSchema,
   type AdminEncounterFilter,
+  type AuditLog,
+  type AuditLogFilter,
   type CreateProviderRequest,
   type Encounter,
   type ProviderSummary,
 } from "@scribe/shared-types";
+import { toAuditLogDto } from "../audit/audit.mapper";
+import { AuditService } from "../audit/audit.service";
 import { CurrentUser, CurrentUserPayload } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { Roles } from "../auth/roles.decorator";
@@ -21,7 +26,10 @@ import { toProviderSummaryDto } from "./admin.mapper";
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles("admin")
 export class AdminController {
-  constructor(private readonly admin: AdminService) {}
+  constructor(
+    private readonly admin: AdminService,
+    private readonly audit: AuditService,
+  ) {}
 
   @Get("ping")
   ping(@CurrentUser() user: CurrentUserPayload) {
@@ -44,15 +52,27 @@ export class AdminController {
 
   @Post("providers")
   async createProvider(
+    @CurrentUser() user: CurrentUserPayload,
     @Body(new ZodValidationPipe(CreateProviderRequestSchema)) body: CreateProviderRequest,
   ): Promise<ProviderSummary> {
-    const row = await this.admin.createProvider(body);
+    const row = await this.admin.createProvider(user.id, body);
     return toProviderSummaryDto(row);
   }
 
   @Patch("providers/:id/deactivate")
-  async deactivateProvider(@Param("id") id: string): Promise<{ ok: true }> {
-    await this.admin.deactivateProvider(id);
+  async deactivateProvider(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param("id") id: string,
+  ): Promise<{ ok: true }> {
+    await this.admin.deactivateProvider(user.id, id);
     return { ok: true };
+  }
+
+  @Get("audit-logs")
+  async listAuditLogs(
+    @Query(new ZodValidationPipe(AuditLogFilterSchema)) filter: AuditLogFilter,
+  ): Promise<AuditLog[]> {
+    const rows = await this.audit.listAll(filter);
+    return rows.map(toAuditLogDto);
   }
 }
