@@ -6,6 +6,7 @@ import { streamScribeGeneration } from "../../api/scribe-stream";
 import { templatesApi } from "../../api/templates";
 import { Icd10SearchWidget } from "../icd10/Icd10SearchWidget";
 import { NoteEditor } from "../note/NoteEditor";
+import { VersionDiff } from "../note/VersionDiff";
 import { VersionHistory } from "../note/VersionHistory";
 import { TranscriptInput } from "./TranscriptInput";
 
@@ -25,6 +26,8 @@ export function EncounterWorkspacePage() {
   const [history, setHistory] = useState<NoteVersion[]>([]);
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [compareFromId, setCompareFromId] = useState("");
+  const [compareToId, setCompareToId] = useState("");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -132,6 +135,9 @@ export function EncounterWorkspacePage() {
     return <p className="loading">Loading encounter...</p>;
   }
 
+  const compareFrom = history.find((v) => v.id === compareFromId);
+  const compareTo = history.find((v) => v.id === compareToId);
+
   return (
     <div className="workspace-shell">
       <header className="app-header">
@@ -180,7 +186,36 @@ export function EncounterWorkspacePage() {
         <section className="panel">
           <h2>Version history</h2>
           <VersionHistory versions={history} onSelect={(v) => setNote(v.note)} />
+          {history.length >= 2 && (
+            <div className="version-compare">
+              <label htmlFor="compare-from">Compare</label>
+              <select id="compare-from" value={compareFromId} onChange={(e) => setCompareFromId(e.target.value)}>
+                <option value="">Version...</option>
+                {history.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    v{v.versionNumber}
+                  </option>
+                ))}
+              </select>
+              <label htmlFor="compare-to">to</label>
+              <select id="compare-to" value={compareToId} onChange={(e) => setCompareToId(e.target.value)}>
+                <option value="">Version...</option>
+                {history.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    v{v.versionNumber}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </section>
+
+        {compareFrom && compareTo && (
+          <section className="panel version-diff-panel">
+            <h2>Version diff</h2>
+            <VersionDiff from={compareFrom} to={compareTo} />
+          </section>
+        )}
 
         {note && (
           <section className="panel">

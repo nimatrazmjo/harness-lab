@@ -343,3 +343,83 @@ button:disabled {
 .loading {
   color: var(--ink-muted);
 }
+
+.version-compare {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.version-compare label {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.version-compare select {
+  width: auto;
+}
+
+.version-diff-panel {
+  grid-column: 1 / -1;
+}
+
+.version-diff__title {
+  font-size: 0.9rem;
+  margin: 0 0 0.75rem;
+}
+
+.version-diff__section {
+  margin-bottom: 1rem;
+}
+
+.version-diff__section h4 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+  margin: 0 0 0.25rem;
+}
+
+.version-diff__unchanged-tag {
+  font-weight: 400;
+  font-style: italic;
+}
+
+.version-diff__lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.version-diff__line {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.15rem 0.5rem;
+  white-space: pre-wrap;
+}
+
+.version-diff__marker {
+  flex-shrink: 0;
+  width: 1ch;
+  font-weight: 700;
+}
+
+.version-diff__line--added {
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.version-diff__line--removed {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.version-diff__line--same {
+  color: var(--ink);
+}

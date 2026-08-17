@@ -17,73 +17,68 @@ goalposts or drift into adjacent work — the two most common ways an agent fake
 
 ## Active sprint
 
-**Feature(s):** `audit.trail` (the last open Tier 1 item)
-**Goal (one sentence):** Every note save and every admin action (provider create/deactivate,
-template create/edit/delete) writes an audit row with actor, action, target, and timestamp to
-RDS, queryable by an admin.
-**Tier:** 1 · **Branch:** `feat/audit-trail`
+**Feature(s):** `pioneer.version_diff` (Tier 2 — first pioneer feature)
+**Goal (one sentence):** A provider can pick any two saved versions of a note and see a
+line-level highlighted diff per SOAP section (plus ICD-10 code additions/removals), entirely from
+data that already exists — no new backend endpoint, no schema change.
+**Tier:** 2 · **Branch:** `feat/version-diff`
 
 ### In scope (only these)
 
-- `AuditService.log()` already exists and is already called from `NotesService.save()` (Tier 0) —
-  that half of the acceptance is done, verify it's still true, don't re-build it
-- Call `audit.log()` from the admin actions that don't yet: `AdminService.createProvider`,
-  `AdminService.deactivateProvider`, and `TemplatesController`'s create/update/delete routes
-- `AuditService.listAll()` exists but isn't exposed via any controller — add
-  `GET /admin/audit-logs` (admin-only, same `@Roles('admin')` gate as the rest of
-  `AdminController`), filterable the same way `admin.view_all` is (actor, action, date range)
-  since "queryable" is explicit in the acceptance text
-- `libs/shared-types`: `AuditLog`/`AuditLogFilter` schemas
+- A pure diff utility (`apps/web/src/features/note/diff.ts`) — LCS-based line diff, no external
+  dependency (consistent with the rest of the frontend, which has none beyond
+  react/react-dom/react-router)
+- `VersionDiff.tsx` component rendering the diff for two `NoteVersion` objects: each SOAP section
+  line-by-line (added/removed/unchanged), plus a simple set-diff on `icd10Codes`
+- Wiring into `EncounterWorkspacePage`/`VersionHistory`: a way to pick two versions and view the
+  diff — extends the existing version list rather than a new page
+- `apps/web/src/features/note/__tests__/diff.test.tsx` — the exact path `feature-list.json` names
 
 ### Explicitly OUT of scope (do not touch this sprint)
 
-- Logging every read (GET) action — acceptance only asks for "saves and admin actions" (writes),
-  not a full access log
-- Any frontend admin UI for browsing the audit log (same reasoning as the admin.* sprint — no
-  frontend test path is listed, and unlike draft persistence, "queryable" is satisfiable entirely
-  via an API a human or a future UI can call; there's no equivalent of "the provider resumes where
-  they left off" forcing frontend observability here)
-- Tier 2 pioneer features
+- Any backend change — `note.version_history`'s existing `GET /encounters/:id/notes` already
+  returns every version's full content; this sprint reads what's already there
+- Any other Tier 2 pioneer feature (writing-style learning, red-flag flagging, bulk PDF export)
+- A dedicated diff-only page/route — this lives inside the existing workspace
 
 ### Done conditions (testable — from feature-list.json acceptance, expanded)
 
-- [ ] A note save writes an audit row (`actor_id`, `action='note.save'`, `target_type='encounter'`,
-      `target_id`, `created_at`) — already true from Tier 0, re-verify with a fresh test in this
-      sprint's file for completeness
-- [ ] Creating a provider via `POST /admin/providers` writes an audit row
-- [ ] Deactivating a provider via `PATCH /admin/providers/:id/deactivate` writes an audit row
-- [ ] Creating, editing, and deleting a template each write an audit row
-- [ ] `GET /admin/audit-logs` returns rows ordered newest-first, each with actor identity
-      (id + name), action, target, and timestamp
-- [ ] The audit log endpoint is filterable (at minimum by action and date range, mirroring
-      `admin.view_all`'s filter shape)
-- [ ] A non-admin cannot read the audit log
-- [ ] Audit rows are never mutated or deleted by any code path — append-only, same spirit as
-      `note_versions` (not a formal invariant, but worth holding to for a real audit trail)
+- [ ] Given two versions with a changed Plan section, the diff highlights the specific added and
+      removed lines, not just "the section changed" — test: `diff.test.tsx`
+- [ ] Unchanged sections/lines render as unchanged, not as spurious add+remove pairs (a real LCS
+      diff, not a naive full-replace) — test: `diff.test.tsx`
+- [ ] ICD-10 codes added between versions are visually distinguished from codes removed and codes
+      present in both — test: `diff.test.tsx`
+- [ ] A provider can select any two versions from the existing version history and see the diff
+      rendered — test: `diff.test.tsx` (component-level; the selection UI itself)
+- [ ] Comparing a version to itself shows no changes (sanity check on the diff algorithm) — test:
+      `diff.test.tsx`
 
 ### Invariants that must still hold (AGENTS.md §2)
 
-- [ ] TENANT-ISOLATION — audit log read is admin-only via the existing `@Roles('admin')` gate
-- [ ] SECRETS — audit `metadata` must never capture a password, token, or transcript/PHI content;
-      only structural facts (version numbers, ids, role changes)
-- [ ] PERSISTENCE — audit rows live in RDS only (already true — `audit_logs` table, no other store)
+- [ ] VERSION-IMMUTABILITY — this feature only ever reads `note_versions`, never writes to it;
+      no risk here since it's frontend-only, but worth stating since it's adjacent to the
+      invariant's data
 
 ### Verification plan (how each condition is proven)
 
-- `apps/api/test/audit.e2e-spec.ts` covering all Done conditions above
-- `pnpm run verify` green; `pnpm --filter api run test:e2e` all green (existing 69 + new)
+- `apps/web/src/features/note/__tests__/diff.test.tsx` — both the diff utility's correctness
+  (unit-level assertions on `diffLines`) and the component's rendering (RTL)
+- `pnpm run verify` green; `pnpm --filter web run test` green (existing 21 + new)
+- Manual browser walkthrough: save two versions of a real note with a deliberate edit, select
+  both, confirm the highlighted diff matches the actual edit
 
 ### Definition of done
 
-- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced note-save
-      logging, provider create/deactivate logging, template create/update/delete logging (3 rows
-      in order), the audit-log query endpoint (newest-first, actor identity), the action filter,
-      and the non-admin 403 — all live against a running instance + raw psql, plus confirmed no
-      password or PHI ever lands in `metadata`
-- [x] `pnpm verify` green (77/77 API e2e); _Leave clean_ gate passed
-- [x] `evaluator-rubric.md` scored — 6/7 PASS, 1/7 CONDITIONAL (non-blocking, closed same
-      session): the sprint's own verification plan claimed date-range filtering was covered by
-      `audit.e2e-spec.ts` when it wasn't — the evaluator verified it worked correctly live but
-      flagged the missing regression test. Added it.
-- [x] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated. **Tier 1 is
-      now 16/16 — complete.**
+- [x] Every _Done condition_ checked with evidence — independent evaluator reproduced a real
+      line-level diff live in a browser (exact removed/added Plan lines, unchanged sections
+      tagged), plus wrote its own adversarial test cases against the LCS algorithm (disjoint
+      text, empty inputs, repeated-line patterns, single-char changes, whitespace) all producing
+      correct/coherent output
+- [x] `pnpm verify` green (30/30 web tests); _Leave clean_ gate passed
+- [x] `evaluator-rubric.md` scored — 7/7 PASS, no CONDITIONALs, no required fixes. One documented
+      edge case noted (not a bug): `diffIcd10Codes` keys purely by code, so a code appearing in
+      both versions with a changed description silently shows the new description as
+      "unchanged" — this matches the contract's own stated caveat that codes are canonical in
+      real data, so descriptions never actually change independently of the code
+- [x] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated
