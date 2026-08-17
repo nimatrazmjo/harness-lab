@@ -14,17 +14,20 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** Tier 1 complete (16/16). Three Tier 2 pioneer features code-complete, verified,
-  and independently evaluated: `pioneer.version_diff` (PASS), `pioneer.red_flags` (CONDITIONAL →
-  both required fixes closed same session), `pioneer.writing_style` (CONDITIONAL → no required
-  fixes, both non-blocking recommendations closed same session).
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 16 / 16 passing   ·   **Tier 2:** 3 / 4 passing (`pioneer.version_diff`, `pioneer.red_flags`, `pioneer.writing_style`)
+- **Active phase:** Tier 1 complete (16/16). **Tier 2 (pioneer) is now complete, 4/4** — all four
+  pioneer features code-complete, verified, and independently evaluated: `pioneer.version_diff`
+  (PASS), `pioneer.red_flags` (CONDITIONAL → both required fixes closed same session),
+  `pioneer.writing_style` (CONDITIONAL → no required fixes, both non-blocking recommendations
+  closed same session), `pioneer.bulk_pdf` (CONDITIONAL → both required fixes + all three
+  non-blocking recommendations closed same session).
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 16 / 16 passing   ·   **Tier 2:** 4 / 4 passing — complete
 - **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
   (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
   ideally by a fresh subagent) are part of the session protocol — see AGENTS.md §1/§5/§11.
-- **Next feature:** per `docs/PRODUCT.md`, Tier 2 is "one or two, done well" — not a checklist to
-  complete. Continuing anyway per explicit user instruction ("continue to finish everything").
-  Remaining: `pioneer.bulk_pdf` (new PDF-generation dependency) — the last Tier 2 item.
+- **Next feature:** none required — all non-blocked features (`feature-list.json`, Tier 0/1/2) are
+  `passing`. Only `infra.rds_postgres_private`/`infra.ec2_nginx_tls` remain, both `blocked` on a
+  human providing real AWS account access (see Blockers below). Nothing left an agent can pick up
+  unattended without new direction from the user.
 - **Known gap (tracked, not yet fixed):** a cross-cycle race in
   `EncounterWorkspacePage`'s transcript-autosave debounce — under elevated network latency, an
   older `updateInput` PATCH resolving after a newer one can leave the DB with a stale transcript,
@@ -40,6 +43,50 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — pioneer.bulk_pdf (CONDITIONAL → closed) — fourth and final Tier 2 feature, Tier 2 now COMPLETE
+- Concrete approach decided in `sprint-contract.md` before coding: `pdfkit` (MIT, pure JS, no
+  native/headless-browser dependency — checked license/version before adding) for rendering; a
+  new `GET /patients/:patientId/export` route; tenant isolation mirrors the existing
+  `EncountersService.getForUser` `allowAdmin` pattern — a non-admin provider's export includes
+  only their own encounters for that patient, never another provider's, even for the same
+  patient; a provider with zero of their own encounters for an existing patient gets 403
+  (consistent with the codebase's existing 403-for-exists-but-forbidden precedent, not 404).
+  Selection logic (`selectEncountersForExport`) kept as a pure, separately unit-tested function so
+  tenant isolation didn't have to be proven by parsing PDF bytes.
+- Independent evaluator: **CONDITIONAL**, two required fixes, both closed same session. (1) A
+  patient name outside the Latin-1 range (tested with CJK) crashed the export entirely —
+  `ERR_INVALID_CHAR` from building `Content-Disposition` out of the raw, unsanitized patient name.
+  Fixed with a `safeFilenameSegment` helper that sanitizes the filename only; the PDF's own text
+  content still renders the real name correctly. (2) The evaluator flagged that the crash from (1)
+  meant an audit row could exist for a request that then 500'd, and asked for either a genuine
+  ordering fix or an explicit documented distinction. **A literal reorder was tried first**
+  (auditing only after `res.send()` completes) — this was found to introduce a real, reproduced
+  race (two consecutive full test reruns failed non-deterministically), because "the handler
+  continues past `res.send()`" and "the client has confirmed receipt" are not the same event and
+  can't be synchronized without added application-level acknowledgment. **Reverted in favor of the
+  evaluator's own offered alternative**: audit logging stays where every other audit call in this
+  codebase already puts it — immediately after the underlying action provably succeeds
+  (`pdfExport.render()` returning real bytes) — with the reasoning now documented directly in
+  `patients.service.ts` so a future session doesn't "fix" this again into the same race.
+- A real bug was also caught and fixed during manual verification, before the evaluator even ran:
+  `patient.dob` is typed `string` on `PatientRow` but `pg` returns a `date` column as a JS `Date`
+  at runtime, so the initial export rendered a raw `Date.toString()` ("Mon Mar 03 1975 00:00:00
+  GMT-0400...") instead of "1975-03-03" — caught by actually opening the generated PDF, not just
+  checking the HTTP status. Fixed at the point of use in `pdf-export.service.ts`.
+- Non-blocking recommendations also closed same session: `doc.on("error", reject)` added as a
+  defensive guard against an unhandled pdfkit stream error; the per-encounter
+  `providersRepo.findById` N+1 batched into one `findByIds` call; and a latent test-only flakiness
+  bug caught while adding the CJK regression test — `bulk-pdf.e2e-spec.ts`'s patient-identity
+  helper used a per-process counter, not a globally unique value, so rerunning the file in a fresh
+  process could silently dedupe onto a prior run's patient and break count-based assertions. Fixed
+  with a `uuid()` suffix; verified stable across three consecutive full reruns.
+- `pnpm run verify` → exit 0. `pnpm --filter api run test:e2e` → 96/96 (was 86).
+- **Tier 2 is now 4/4 — all pioneer features complete.** Per `docs/PRODUCT.md`'s "one or two, done
+  well" guidance this was already more than required; completed anyway per the user's explicit
+  "continue to finish everything" instruction this session.
+
+---
 
 ### 2026-08-17 — pioneer.writing_style (CONDITIONAL → closed) — third Tier 2 feature
 - Concrete mechanism decided in `sprint-contract.md` before any code, specifically to avoid a

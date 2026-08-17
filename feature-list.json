@@ -700,7 +700,7 @@
       "id": "pioneer.bulk_pdf",
       "tier": 2,
       "title": "Pioneer: bulk patient PDF export",
-      "status": "failing",
+      "status": "passing",
       "description": "Bulk export of all encounters for a given patient across all visits as a single structured PDF.",
       "acceptance": [
         "A patient's encounters export to one structured, readable PDF.",

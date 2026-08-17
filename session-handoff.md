@@ -34,24 +34,29 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 - **Tier 1: COMPLETE — 16/16 passing.** Every item independently evaluated PASS or an accepted
   CONDITIONAL, and every CONDITIONAL was closed same-session before being marked done. No
   outstanding debt.
-- **Tier 2: 3/4 passing** — `pioneer.version_diff` done (entirely frontend, hand-rolled LCS diff
-  in `apps/web/src/features/note/diff.ts`, `VersionDiff.tsx`, compare dropdowns in
+- **Tier 2: COMPLETE — 4/4 passing.** `pioneer.version_diff` done (entirely frontend, hand-rolled
+  LCS diff in `apps/web/src/features/note/diff.ts`, `VersionDiff.tsx`, compare dropdowns in
   `EncounterWorkspacePage`). Independently evaluated 7/7 PASS, including the evaluator writing its
   own adversarial test cases against the diff algorithm (not just trusting the existing suite).
-  `pioneer.red_flags` also done (`libs/ai/src/red-flags.ts` — 11 deterministic regex patterns, no
-  LLM call; `GET /encounters/:id/red-flags`, tenant-scoped; advisory banner in
+  `pioneer.red_flags` done (`libs/ai/src/red-flags.ts` — 11 deterministic regex patterns, no LLM
+  call; `GET /encounters/:id/red-flags`, tenant-scoped; advisory banner in
   `EncounterWorkspacePage`, Generate button never gated on flags). Independently evaluated
   CONDITIONAL — 2 required + 2 non-blocking pattern gaps found, **all 4 fixed same session** (see
   "Known gaps" below for the one thing the evaluator found that was NOT fixed this sprint).
-  `pioneer.writing_style` also done (`libs/ai/src/writing-style.ts` — `inferWritingStyle`, a
+  `pioneer.writing_style` done (`libs/ai/src/writing-style.ts` — `inferWritingStyle`, a
   deterministic "patient"→"pt" abbreviation-preference detector learned from a provider's own
   saved `note_versions`; applied server-side in `MockModelClient` via `applyWritingStyle`).
   Independently evaluated CONDITIONAL — no required fixes (mechanism was correct pre-pass), 2
-  non-blocking recommendations (a missing before/after e2e test, a doc comment on a known "pt" vs.
-  clinical-PT ambiguity), **both closed same session**.
-  Per `docs/PRODUCT.md`: Tier 2 is "one or two, done well," not a checklist — remaining items are
-  being attempted per an explicit "continue to finish everything" instruction from the user this
-  session, not because they're required. Only `pioneer.bulk_pdf` remains.
+  non-blocking recommendations, **both closed same session**.
+  `pioneer.bulk_pdf` done (`GET /patients/:patientId/export` — `pdfkit`-rendered, tenant-scoped
+  like every other encounter route, audit-logged). Independently evaluated CONDITIONAL — 2
+  required fixes (a non-Latin-1 patient name crashed the export; an audit-ordering concern that
+  was investigated, found to be an unfixable race if taken literally, and resolved by documenting
+  the audit-at-generation-success semantic instead), **both closed same session**, plus all 3
+  non-blocking recommendations.
+  Per `docs/PRODUCT.md`: Tier 2 was only ever "one or two, done well," not a checklist — all four
+  were completed anyway per an explicit "continue to finish everything" instruction from the user
+  this session.
 - **TENANT-ISOLATION clarified** (2026-08-17): `AGENTS.md` §2 states a patient's clinical history
   CAN cross providers (continuity of care); direct access to another provider's *encounter
   record* stays 403. Settled.
@@ -79,6 +84,17 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   substitution ("Patient"/"patient" → "Pt"/"pt") across all four SOAP sections — no-op unless the
   profile says "pt", so a provider with no/thin history sees byte-identical output to before this
   feature existed. No frontend surface (not required by acceptance).
+- **Bulk PDF export exists**: `GET /patients/:patientId/export` (new `PatientsController`/
+  `PatientsService`/`PdfExportService` in `apps/api/src/patients/`) renders every encounter a
+  requesting provider owns for a patient (or every provider's, for an admin) as one PDF via
+  `pdfkit`. Tenant-isolation selection (`selectEncountersForExport`) is a pure function, unit-
+  tested separately from rendering. 403 (not 404) if the patient exists but the requester owns
+  none of their encounters. Audits once per export (`patient.bulk_pdf_export`, `metadata:
+  {encounterCount}`, no PHI) — logged right after `pdfExport.render()` succeeds, deliberately NOT
+  after `res.send()` (that reorder was tried and found to be a genuine unfixable race — see
+  `patients.service.ts`'s comment). Filenames are ASCII-sanitized (`safeFilenameSegment` in
+  `patients.controller.ts`) so a non-Latin-1 patient name can't crash the response — the PDF body
+  text itself still shows the real name correctly.
 
 ## Environment (must-know before touching anything)
 
@@ -97,7 +113,7 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 - To start Postgres: `docker compose -f infra/docker-compose.yml up -d`, then
   `pnpm --filter api run db:migrate && pnpm --filter api run db:seed && pnpm --filter api run icd10:embed`.
 - Full check: `pnpm run verify` — exits 0 as of this session. `pnpm --filter api run test:e2e` runs
-  86 tests; `pnpm --filter web run test` runs 30; `pnpm --filter @scribe/ai run test` runs 33.
+  96 tests; `pnpm --filter web run test` runs 30; `pnpm --filter @scribe/ai run test` runs 33.
 - Demo logins: `dr.chen@clinic.dev` / `provider-pass-1` (+ 2 more), `admin@clinic.dev` /
   `admin-pass-1`. Dev DB accumulates throwaway `test-<uuid>@example.dev` accounts from e2e runs
   (400+ by now) — harmless, or wipe with `docker compose -f infra/docker-compose.yml down -v` +
@@ -124,6 +140,8 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   hash-bag-of-words cosine approximation — known, accepted limitation, don't "fix" it.
 - **infra/**: `docker-compose.yml` (local pg+pgvector, NOT real RDS), `nginx.conf` (written, not
   deployed), `DEPLOY.md` (manual AWS steps, not yet executed).
+- **pdfkit** (`apps/api` dependency, added this session): MIT-licensed, pure-JS PDF rendering, no
+  native/headless-browser dependency — used only by `PdfExportService`. Not used anywhere else.
 - **docs/erd.md**: full schema ERD + table-by-table rationale.
 
 ## Known gaps / things NOT done
@@ -132,8 +150,8 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   human with account access; everything code/config-side is ready in `infra/DEPLOY.md`).
 - No Playwright web e2e — only Vitest component tests for the web app.
 - No admin frontend UI (backend-only, by design — no acceptance test requires it).
-- Tier 2 (pioneer): only `bulk_pdf` unstarted — `version_diff`, `red_flags`, and `writing_style`
-  are now done. Not urgent per product doc; being attempted anyway per explicit user instruction.
+- Tier 2 (pioneer) is fully complete — all four items (`version_diff`, `red_flags`,
+  `writing_style`, `bulk_pdf`) done. Nothing left in this tier.
 - `pioneer.writing_style`'s style window can go "sticky" for long-lived provider accounts (an
   older majority of saved notes can dilute a real, recent preference shift) — a conscious,
   undecided product question flagged by the evaluator, not a bug. Worth a decision if this ever
@@ -151,31 +169,33 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 
 ## Next feature to work
 
-Per the user's explicit "continue to finish everything" instruction, proceed to the last Tier 2
-pioneer item, `pioneer.bulk_pdf` — same sprint-contract-first workflow as the prior three:
+**Nothing is required.** Tier 0 (15/17, 2 blocked on real AWS access), Tier 1 (16/16), and Tier 2
+(4/4) are all complete — every non-blocked item in `feature-list.json` is `passing`. The "continue
+to finish everything" instruction that drove this session's Tier 2 work is now fully satisfied.
 
-- **`pioneer.bulk_pdf`** — "Bulk export of all encounters for a given patient across all visits as
-  a single structured PDF." Needs a new dependency (a PDF-generation library — check what's
-  already permitted/installed before adding one; this repo has otherwise stayed dependency-light,
-  no UI framework, hand-rolled diff instead of a library, etc. — pick something small and
-  well-established, e.g. `pdfkit` or `@react-pdf/renderer` are common Node choices, but decide and
-  record the choice in `sprint-contract.md` before installing). Acceptance requires: tenant
-  isolation (only the patient's own provider, or admin — same guard shape as every other
-  encounter-scoped route) and audit logging (this is a data-export action, same category as every
-  other audit-logged admin/write action already in the system). Test file already named in
-  `feature-list.json`: `apps/api/test/bulk-pdf.e2e-spec.ts`.
+What's left, in priority order if the user wants to keep going:
+1. **The tracked cross-cycle autosave race** (see "Known gaps" above, found by the `red_flags`
+   evaluator two sprints ago, still untouched) — a real, confirmed bug in core Tier 0/1 save-path
+   logic (`EncounterWorkspacePage`'s transcript-autosave debounce), not Tier 2 scope. This is the
+   most concrete, well-understood next unit of work if the user wants a bug fixed rather than a
+   new feature. Needs its own `sprint-contract.md` since it touches core generation-input
+   correctness, not a pioneer add-on.
+2. **`infra.rds_postgres_private` / `infra.ec2_nginx_tls`** — the only remaining `blocked` items.
+   Everything code/config-side is ready (`infra/DEPLOY.md`, `nginx.conf`, migrations); only real
+   AWS account provisioning is outstanding, which requires the user to provide credentials/access.
+3. Nothing else in `feature-list.json` is `failing` — a fresh session should not invent new scope
+   without the user asking for it first (see AGENTS.md §5: "Prioritization is graded — an
+   incomplete build that feels finished beats a complete build with sloppy infra," and Tier 2 was
+   already explicitly optional per `docs/PRODUCT.md`).
 
-Also worth surfacing to the user once "continue to finish everything" is done: the tracked
-cross-cycle autosave race (see "Known gaps" above, found by the `red_flags` evaluator) deserves
-its own sprint before more work compounds on top of it — it's core Tier 0/1 save-path logic, not
-Tier 2 scope, and hasn't been touched across the last two pioneer sprints.
-
-**Before writing any code:** overwrite `sprint-contract.md`'s Active sprint section fresh — decide
-the concrete PDF-generation approach and library choice up front, the way `writing_style`'s
-concrete mechanism was decided before coding to avoid hand-waving. **After the code is green:**
-launch a fresh evaluator subagent (repo path, branch name, an unused scratch port, explicit
-instruction to reproduce claims live rather than trust them). **If it flags anything, even
-non-blocking, close what's cheap to close same-session** — pattern held for `version_diff` (clean
-PASS, nothing to close), `red_flags` (CONDITIONAL, both required fixes + both non-blocking
-recommendations closed same session), and `writing_style` (CONDITIONAL, no required fixes, both
-non-blocking recommendations closed same session).
+**If picking up (1) or anything new:** overwrite `sprint-contract.md`'s Active sprint section
+fresh before writing code. **After the code is green:** launch a fresh evaluator subagent (repo
+path, branch name, an unused scratch port, explicit instruction to reproduce claims live rather
+than trust them, told to actually run the app rather than just read tests). **If it flags
+anything, even non-blocking, close what's cheap to close same-session** — this pattern held
+across all four Tier 2 sprints this session: `version_diff` (clean 7/7 PASS, nothing to close),
+`red_flags` (CONDITIONAL, 2 required + 2 non-blocking closed), `writing_style` (CONDITIONAL, 0
+required + 2 non-blocking closed), `bulk_pdf` (CONDITIONAL, 2 required + 3 non-blocking closed,
+including a required fix where the "obvious" literal resolution was tried, found to introduce a
+worse problem — a genuine race — and reverted in favor of the evaluator's own offered alternative
+of documenting the design decision instead of chasing an unachievable guarantee).
