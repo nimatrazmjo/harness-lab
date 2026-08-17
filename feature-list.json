@@ -21,21 +21,23 @@
       "1": "CORE DIFFERENTIATORS. Build only after every Tier 0 item is passing.",
       "2": "PIONEER / STRETCH. Only if Tier 0 + Tier 1 are solid. One or two well-chosen items here make you stand out."
     },
-    "invariantsRef": "See AGENTS.md §2 — no feature may violate a non-negotiable invariant."
+    "invariantsRef": "See AGENTS.md \u00a72 \u2014 no feature may violate a non-negotiable invariant."
   },
   "features": [
     {
       "id": "infra.env_secrets",
       "tier": 0,
       "title": "Secrets via AWS Secrets Manager / Parameter Store",
-      "status": "failing",
+      "status": "passing",
       "description": "All DB credentials and API keys load at runtime from AWS Secrets Manager or Parameter Store. Nothing sensitive is committed.",
       "acceptance": [
         "No credential, API key, or token appears anywhere in the repo, including committed .env files.",
         ".env is git-ignored; .env.example documents shape with placeholders only.",
         "The running app reads real secrets from Secrets Manager via an EC2 IAM role (no keys on disk)."
       ],
-      "tests": ["scripts/check-no-committed-secrets.sh (gitleaks)"],
+      "tests": [
+        "scripts/check-no-committed-secrets.sh (gitleaks)"
+      ],
       "dependsOn": [],
       "rubric": "Infrastructure rigor: secrets management"
     },
@@ -43,7 +45,7 @@
       "id": "infra.rds_postgres_private",
       "tier": 0,
       "title": "RDS Postgres (private, pgvector) as the only durable store",
-      "status": "failing",
+      "status": "blocked",
       "description": "Provision RDS PostgreSQL in a private subnet with pgvector enabled. It is the sole persistence layer.",
       "acceptance": [
         "RDS has no public IP; security group accepts 5432 only from the EC2 security group.",
@@ -51,45 +53,58 @@
         "No SQLite, in-memory, or flat-file persistence exists anywhere for durable data.",
         "Public connection attempts to RDS are refused (demonstrable in the walkthrough)."
       ],
-      "tests": ["apps/api/test/health.e2e-spec.ts (reads through pool)"],
-      "dependsOn": ["infra.env_secrets"],
+      "tests": [
+        "apps/api/test/health.e2e-spec.ts (reads through pool)"
+      ],
+      "dependsOn": [
+        "infra.env_secrets"
+      ],
       "rubric": "Infrastructure rigor: VPC isolation of RDS"
     },
     {
       "id": "infra.connection_pooling",
       "tier": 0,
       "title": "Correct DB connection pooling",
-      "status": "failing",
+      "status": "passing",
       "description": "A single bounded connection pool per process. The instance never opens a new DB connection per request.",
       "acceptance": [
         "One shared pool is created at startup and reused across requests.",
         "Pool size is bounded and configurable; documented awareness of RDS max_connections (RDS Proxy/PgBouncer for scale).",
         "A load test shows connection count stays bounded, not one-per-request."
       ],
-      "tests": ["apps/api/test/pool.e2e-spec.ts"],
-      "dependsOn": ["infra.rds_postgres_private"],
+      "tests": [
+        "apps/api/test/pool.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "infra.rds_postgres_private"
+      ],
       "rubric": "Infrastructure rigor: connection pooling"
     },
     {
       "id": "infra.ec2_nginx_tls",
       "tier": 0,
       "title": "EC2 behind nginx with valid HTTPS",
-      "status": "failing",
+      "status": "blocked",
       "description": "App hosted on EC2, reachable over HTTPS with a valid (non-self-signed) certificate, behind an nginx reverse proxy.",
       "acceptance": [
         "nginx terminates TLS on 443 and proxies to the Node process on localhost.",
         "The Node process is NOT directly exposed on port 80 or 443.",
         "Certificate is valid and CA-issued (e.g. Let's Encrypt), not self-signed."
       ],
-      "tests": ["infra/nginx.conf", "scripts/verify-tls.sh"],
-      "dependsOn": ["infra.env_secrets"],
+      "tests": [
+        "infra/nginx.conf",
+        "scripts/verify-tls.sh"
+      ],
+      "dependsOn": [
+        "infra.env_secrets"
+      ],
       "rubric": "Infrastructure rigor: reverse proxy configuration"
     },
     {
       "id": "infra.schema_erd",
       "tier": 0,
       "title": "Normalized schema + migrations + defensible ERD",
-      "status": "failing",
+      "status": "passing",
       "description": "A normalized relational schema managed by migrations, with an ERD you can defend table-by-table.",
       "acceptance": [
         "Tables: providers, patients, encounters, note_versions, templates, audit_logs, drafts, icd10_codes (with vector column).",
@@ -97,184 +112,238 @@
         "Schema is created and evolved exclusively through migrations.",
         "An ERD diagram exists and every table/relationship can be justified."
       ],
-      "tests": ["apps/api/migrations/*", "docs/erd.md"],
-      "dependsOn": ["infra.rds_postgres_private"],
+      "tests": [
+        "apps/api/migrations/*",
+        "docs/erd.md"
+      ],
+      "dependsOn": [
+        "infra.rds_postgres_private"
+      ],
       "rubric": "Database design: schema quality, normalization, indexing"
     },
     {
       "id": "auth.login",
       "tier": 0,
       "title": "Real login with JWT/session tokens",
-      "status": "failing",
+      "status": "passing",
       "description": "A working login system issuing JWTs or session tokens, with hashed passwords and token expiry.",
       "acceptance": [
         "Passwords hashed with argon2/bcrypt; never stored or logged in plaintext.",
         "Tokens carry role + identity and have an expiry.",
         "Every layer (issuance, storage, guard, expiry) is explainable in the walkthrough."
       ],
-      "tests": ["apps/api/test/auth.e2e-spec.ts"],
-      "dependsOn": ["infra.schema_erd"],
+      "tests": [
+        "apps/api/test/auth.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "infra.schema_erd"
+      ],
       "rubric": "Auth: explain every layer"
     },
     {
       "id": "auth.roles_seed",
       "tier": 0,
       "title": "Provider + Admin roles with seeded demo accounts",
-      "status": "failing",
+      "status": "passing",
       "description": "Two distinct roles. Seed at least three provider accounts and one admin account (hashed passwords) for the demo.",
       "acceptance": [
         "Roles: provider and admin, enforced by guards.",
         "Seed script creates >=3 providers and 1 admin with hashed passwords.",
         "Role determines access to provider vs admin surfaces."
       ],
-      "tests": ["apps/api/test/roles.e2e-spec.ts", "tools/seed.ts"],
-      "dependsOn": ["auth.login"],
+      "tests": [
+        "apps/api/test/roles.e2e-spec.ts",
+        "tools/seed.ts"
+      ],
+      "dependsOn": [
+        "auth.login"
+      ],
       "rubric": "Auth: multi-role access"
     },
     {
       "id": "auth.tenant_isolation",
       "tier": 0,
       "title": "Provider data isolation",
-      "status": "failing",
+      "status": "passing",
       "description": "Providers can see and act on only their own encounters. Admin-wide access only via an explicit admin guard.",
       "acceptance": [
         "Every provider-facing query is scoped to the authenticated provider_id.",
         "Provider A requesting Provider B's encounter receives 403.",
         "Admin can access all encounters through an admin-only guard."
       ],
-      "tests": ["apps/api/test/tenant-isolation.e2e-spec.ts"],
-      "dependsOn": ["auth.roles_seed"],
+      "tests": [
+        "apps/api/test/tenant-isolation.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "auth.roles_seed"
+      ],
       "rubric": "Auth + security: isolation"
     },
     {
       "id": "encounter.create",
       "tier": 0,
       "title": "Start a new encounter",
-      "status": "failing",
+      "status": "passing",
       "description": "A logged-in provider starts an encounter by entering patient first name, last name, and date of birth.",
       "acceptance": [
         "Encounter is created and linked to the authenticated provider and a patient record.",
         "Patient identity is first name + last name + DOB.",
         "Encounter persists to RDS with a draft status."
       ],
-      "tests": ["apps/api/test/encounter.e2e-spec.ts"],
-      "dependsOn": ["auth.tenant_isolation"],
+      "tests": [
+        "apps/api/test/encounter.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "auth.tenant_isolation"
+      ],
       "rubric": "Core workflow"
     },
     {
       "id": "encounter.input",
       "tier": 0,
       "title": "Transcript / freeform input",
-      "status": "failing",
+      "status": "passing",
       "description": "The provider pastes a raw encounter transcript or types freeform clinical observations into a text area.",
       "acceptance": [
         "A text area accepts pasted transcript or freeform notes.",
         "Input is associated with the open encounter.",
         "The workspace looks like a clinical tool (clean, dense, high-trust)."
       ],
-      "tests": ["apps/web/src/features/encounter/__tests__/input.test.tsx"],
-      "dependsOn": ["encounter.create"],
+      "tests": [
+        "apps/web/src/features/encounter/__tests__/input.test.tsx"
+      ],
+      "dependsOn": [
+        "encounter.create"
+      ],
       "rubric": "UI quality + core workflow"
     },
     {
       "id": "scribe.generate_stream",
       "tier": 0,
       "title": "Generate SOAP note with SSE streaming",
-      "status": "failing",
+      "status": "passing",
       "description": "Clicking Generate Note streams a structured SOAP note back in real time via server-sent events, rendering progressively.",
       "acceptance": [
         "Generation streams token-by-token via SSE; the UI renders progressively.",
         "No full-page reload and no spinner-then-dump.",
         "A test confirms multiple chunks arrive over time, not a single blob."
       ],
-      "tests": ["apps/api/test/scribe-stream.e2e-spec.ts"],
-      "dependsOn": ["encounter.input"],
+      "tests": [
+        "apps/api/test/scribe-stream.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "encounter.input"
+      ],
       "rubric": "Streaming implementation"
     },
     {
       "id": "scribe.soap_sections",
       "tier": 0,
       "title": "Structured S/O/A/P output",
-      "status": "failing",
+      "status": "passing",
       "description": "The generated note includes Subjective, Objective, Assessment, and Plan sections.",
       "acceptance": [
         "All four SOAP sections are present and clearly delineated.",
         "Sections are populated from the clinical input, not boilerplate."
       ],
-      "tests": ["apps/api/test/soap-structure.e2e-spec.ts"],
-      "dependsOn": ["scribe.generate_stream"],
+      "tests": [
+        "apps/api/test/soap-structure.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "scribe.generate_stream"
+      ],
       "rubric": "Core AI scribe correctness"
     },
     {
       "id": "scribe.icd10_assessment",
       "tier": 0,
       "title": "ICD-10 code(s) in the Assessment",
-      "status": "failing",
+      "status": "passing",
       "description": "The Assessment includes at least one suggested ICD-10 code and description semantically matched to the clinical content.",
       "acceptance": [
         ">=1 ICD-10 code + description appears in the Assessment.",
         "The code is semantically relevant to the input, not random.",
-        "No fabricated codes — codes come from the embedded ICD-10 set."
+        "No fabricated codes \u2014 codes come from the embedded ICD-10 set."
       ],
-      "tests": ["apps/api/test/icd10-assessment.e2e-spec.ts"],
-      "dependsOn": ["scribe.soap_sections"],
+      "tests": [
+        "apps/api/test/icd10-assessment.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "scribe.soap_sections"
+      ],
       "rubric": "Core AI scribe correctness"
     },
     {
       "id": "note.inline_edit",
       "tier": 0,
       "title": "Inline edit before save",
-      "status": "failing",
+      "status": "passing",
       "description": "The provider can edit the generated note inline before saving (human-in-the-loop).",
       "acceptance": [
         "All sections are editable in place.",
         "Edits are preserved through to save."
       ],
-      "tests": ["apps/web/src/features/note/__tests__/edit.test.tsx"],
-      "dependsOn": ["scribe.icd10_assessment"],
+      "tests": [
+        "apps/web/src/features/note/__tests__/edit.test.tsx"
+      ],
+      "dependsOn": [
+        "scribe.icd10_assessment"
+      ],
       "rubric": "Core workflow + clinical safety"
     },
     {
       "id": "note.save",
       "tier": 0,
       "title": "Save finalized note to RDS",
-      "status": "failing",
+      "status": "passing",
       "description": "The finalized note is saved to RDS.",
       "acceptance": [
         "Saving writes the note to RDS (never memory or a file).",
         "The saved note is retrievable and tied to the encounter and provider."
       ],
-      "tests": ["apps/api/test/note-save.e2e-spec.ts"],
-      "dependsOn": ["note.inline_edit"],
+      "tests": [
+        "apps/api/test/note-save.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "note.inline_edit"
+      ],
       "rubric": "Persistence"
     },
     {
       "id": "note.versioning_immutable",
       "tier": 0,
       "title": "Immutable note versioning",
-      "status": "failing",
+      "status": "passing",
       "description": "Every edit-and-re-save writes a new version to RDS. Prior versions are never overwritten or deleted.",
       "acceptance": [
         "Re-saving INSERTs a new note_versions row; no UPDATE/DELETE of existing versions.",
         "Editing a note twice leaves version 1 byte-for-byte unchanged and retrievable.",
         "Each version records who saved it and when."
       ],
-      "tests": ["apps/api/test/note-versioning.e2e-spec.ts"],
-      "dependsOn": ["note.save"],
+      "tests": [
+        "apps/api/test/note-versioning.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "note.save"
+      ],
       "rubric": "Database design + audit trail"
     },
     {
       "id": "note.version_history",
       "tier": 0,
       "title": "View full version history",
-      "status": "failing",
+      "status": "passing",
       "description": "Providers can view the full version history of any note, including author and timestamp per version, retrieved from RDS.",
       "acceptance": [
         "Version history lists every version with author + timestamp.",
         "History is read from RDS, not memory or a file."
       ],
-      "tests": ["apps/web/src/features/note/__tests__/history.test.tsx"],
-      "dependsOn": ["note.versioning_immutable"],
+      "tests": [
+        "apps/web/src/features/note/__tests__/history.test.tsx"
+      ],
+      "dependsOn": [
+        "note.versioning_immutable"
+      ],
       "rubric": "Audit trail"
     },
     {
@@ -287,8 +356,12 @@
         "Starting an encounter for an existing patient (first+last+DOB) links to that patient.",
         "First-time patients create a new patient record."
       ],
-      "tests": ["apps/api/test/patient-match.e2e-spec.ts"],
-      "dependsOn": ["note.version_history"],
+      "tests": [
+        "apps/api/test/patient-match.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "note.version_history"
+      ],
       "rubric": "Patient history & context injection"
     },
     {
@@ -296,14 +369,18 @@
       "tier": 1,
       "title": "Backend tool-call history injection",
       "status": "failing",
-      "description": "For a returning patient, the AI retrieves and injects prior encounter history as context during generation via a backend tool/function call — not by stuffing prior notes into the frontend prompt.",
+      "description": "For a returning patient, the AI retrieves and injects prior encounter history as context during generation via a backend tool/function call \u2014 not by stuffing prior notes into the frontend prompt.",
       "acceptance": [
         "Prior history is fetched by a backend tool/function call during generation.",
         "Prior notes are never sent from or through the frontend prompt.",
         "The AI references relevant prior diagnoses/treatments where clinically appropriate."
       ],
-      "tests": ["apps/api/test/context-injection.e2e-spec.ts"],
-      "dependsOn": ["patient.match"],
+      "tests": [
+        "apps/api/test/context-injection.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "patient.match"
+      ],
       "rubric": "Patient history & context injection"
     },
     {
@@ -316,8 +393,12 @@
         "A returning patient's note reflects injected history; a first-time patient's does not.",
         "The difference is demonstrable in the walkthrough."
       ],
-      "tests": ["apps/api/test/context-behavior.e2e-spec.ts"],
-      "dependsOn": ["context.history_injection"],
+      "tests": [
+        "apps/api/test/context-behavior.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "context.history_injection"
+      ],
       "rubric": "Patient history & context injection"
     },
     {
@@ -331,8 +412,13 @@
         "A plain-English query returns the top semantically relevant codes.",
         "No external ICD-10 API is used."
       ],
-      "tests": ["apps/api/test/icd10-search.e2e-spec.ts", "tools/icd10-embed.ts"],
-      "dependsOn": ["note.version_history"],
+      "tests": [
+        "apps/api/test/icd10-search.e2e-spec.ts",
+        "tools/icd10-embed.ts"
+      ],
+      "dependsOn": [
+        "note.version_history"
+      ],
       "rubric": "ICD-10 code search"
     },
     {
@@ -345,8 +431,12 @@
         "The widget accepts plain-English input and shows ranked results.",
         "Results show code + description."
       ],
-      "tests": ["apps/web/src/features/icd10/__tests__/widget.test.tsx"],
-      "dependsOn": ["icd10.vector_search"],
+      "tests": [
+        "apps/web/src/features/icd10/__tests__/widget.test.tsx"
+      ],
+      "dependsOn": [
+        "icd10.vector_search"
+      ],
       "rubric": "ICD-10 code search"
     },
     {
@@ -359,8 +449,12 @@
         "Clicking a result appends the code + description to the Assessment.",
         "The appended code persists with the note on save."
       ],
-      "tests": ["apps/web/src/features/icd10/__tests__/append.test.tsx"],
-      "dependsOn": ["icd10.search_widget"],
+      "tests": [
+        "apps/web/src/features/icd10/__tests__/append.test.tsx"
+      ],
+      "dependsOn": [
+        "icd10.search_widget"
+      ],
       "rubric": "ICD-10 code search"
     },
     {
@@ -374,8 +468,12 @@
         "Filters by provider and by date range work.",
         "Non-admins cannot reach this view."
       ],
-      "tests": ["apps/api/test/admin-encounters.e2e-spec.ts"],
-      "dependsOn": ["note.version_history"],
+      "tests": [
+        "apps/api/test/admin-encounters.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "note.version_history"
+      ],
       "rubric": "Admin dashboard"
     },
     {
@@ -389,8 +487,12 @@
         "Admin can deactivate a provider; deactivated providers cannot log in.",
         "Deactivation behavior for an open draft is defined (see edge.provider_deactivated)."
       ],
-      "tests": ["apps/api/test/admin-roster.e2e-spec.ts"],
-      "dependsOn": ["admin.view_all"],
+      "tests": [
+        "apps/api/test/admin-roster.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "admin.view_all"
+      ],
       "rubric": "Admin dashboard"
     },
     {
@@ -403,8 +505,12 @@
         "Admin can create, edit, and delete templates.",
         "Templates persist in RDS."
       ],
-      "tests": ["apps/api/test/templates-crud.e2e-spec.ts"],
-      "dependsOn": ["admin.view_all"],
+      "tests": [
+        "apps/api/test/templates-crud.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "admin.view_all"
+      ],
       "rubric": "Admin dashboard: templates"
     },
     {
@@ -418,8 +524,12 @@
         "Output visibly differs by template (e.g. ortho follow-up vs new-patient eval).",
         "The template is applied server-side, not from the client prompt."
       ],
-      "tests": ["apps/api/test/template-apply.e2e-spec.ts"],
-      "dependsOn": ["admin.templates_crud"],
+      "tests": [
+        "apps/api/test/template-apply.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "admin.templates_crud"
+      ],
       "rubric": "Admin dashboard: templates"
     },
     {
@@ -432,8 +542,12 @@
         "Admin edits a template; the provider's next generation uses the new version.",
         "No page refresh is required for the change to take effect."
       ],
-      "tests": ["apps/api/test/template-live-update.e2e-spec.ts"],
-      "dependsOn": ["admin.template_select"],
+      "tests": [
+        "apps/api/test/template-live-update.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "admin.template_select"
+      ],
       "rubric": "Admin dashboard: templates take effect immediately"
     },
     {
@@ -446,8 +560,12 @@
         "In-progress draft state is written to RDS as it changes.",
         "After refresh or close/reopen, the provider resumes exactly where they left off."
       ],
-      "tests": ["apps/api/test/draft-persist.e2e-spec.ts"],
-      "dependsOn": ["encounter.input"],
+      "tests": [
+        "apps/api/test/draft-persist.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "encounter.input"
+      ],
       "rubric": "Session persistence"
     },
     {
@@ -460,8 +578,12 @@
         "Draft state is keyed to the provider + encounter in RDS, not to the browser.",
         "A different browser/device shows the same restored draft."
       ],
-      "tests": ["apps/api/test/draft-cross-device.e2e-spec.ts"],
-      "dependsOn": ["session.draft_persist"],
+      "tests": [
+        "apps/api/test/draft-cross-device.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "session.draft_persist"
+      ],
       "rubric": "Session persistence"
     },
     {
@@ -469,14 +591,18 @@
       "tier": 1,
       "title": "Non-happy-path: no clinical content",
       "status": "failing",
-      "description": "A transcript with no clinically meaningful content is handled gracefully — the AI does not fabricate a SOAP note.",
+      "description": "A transcript with no clinically meaningful content is handled gracefully \u2014 the AI does not fabricate a SOAP note.",
       "acceptance": [
         "Empty/garbage clinical input returns a clear 'insufficient content' response.",
         "No hallucinated SOAP note or ICD-10 code is generated.",
         "Demonstrated explicitly in the walkthrough."
       ],
-      "tests": ["apps/api/test/edge-no-content.e2e-spec.ts"],
-      "dependsOn": ["scribe.icd10_assessment"],
+      "tests": [
+        "apps/api/test/edge-no-content.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "scribe.icd10_assessment"
+      ],
       "rubric": "Non-happy-path handling"
     },
     {
@@ -490,8 +616,12 @@
         "The provider is re-authenticated (or the draft is preserved) and can complete the save.",
         "Demonstrated explicitly in the walkthrough."
       ],
-      "tests": ["apps/api/test/edge-expired-save.e2e-spec.ts"],
-      "dependsOn": ["session.draft_persist"],
+      "tests": [
+        "apps/api/test/edge-expired-save.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "session.draft_persist"
+      ],
       "rubric": "Non-happy-path handling"
     },
     {
@@ -504,8 +634,12 @@
         "Note saves and admin actions (roster/template changes) write audit rows with actor, action, target, timestamp.",
         "Audit logs live in RDS and are queryable."
       ],
-      "tests": ["apps/api/test/audit.e2e-spec.ts"],
-      "dependsOn": ["note.versioning_immutable"],
+      "tests": [
+        "apps/api/test/audit.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "note.versioning_immutable"
+      ],
       "rubric": "Audit trail"
     },
     {
@@ -518,8 +652,12 @@
         "Provider can select two versions and see a highlighted diff.",
         "Diff is accurate at the section/line level."
       ],
-      "tests": ["apps/web/src/features/note/__tests__/diff.test.tsx"],
-      "dependsOn": ["note.version_history"],
+      "tests": [
+        "apps/web/src/features/note/__tests__/diff.test.tsx"
+      ],
+      "dependsOn": [
+        "note.version_history"
+      ],
       "rubric": "Pioneer feature"
     },
     {
@@ -532,8 +670,12 @@
         "Generation reflects a provider's prior phrasing patterns drawn from their saved notes.",
         "The adaptation is server-side and demonstrable across a provider's history."
       ],
-      "tests": ["apps/api/test/writing-style.e2e-spec.ts"],
-      "dependsOn": ["context.history_injection"],
+      "tests": [
+        "apps/api/test/writing-style.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "context.history_injection"
+      ],
       "rubric": "Pioneer feature"
     },
     {
@@ -546,8 +688,12 @@
         "Red-flag terms/patterns are surfaced to the provider before generation.",
         "Flags are advisory (human-in-the-loop), not blocking."
       ],
-      "tests": ["apps/api/test/red-flags.e2e-spec.ts"],
-      "dependsOn": ["scribe.generate_stream"],
+      "tests": [
+        "apps/api/test/red-flags.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "scribe.generate_stream"
+      ],
       "rubric": "Pioneer feature"
     },
     {
@@ -560,8 +706,12 @@
         "A patient's encounters export to one structured, readable PDF.",
         "Export respects tenant isolation and audit logging."
       ],
-      "tests": ["apps/api/test/bulk-pdf.e2e-spec.ts"],
-      "dependsOn": ["note.version_history"],
+      "tests": [
+        "apps/api/test/bulk-pdf.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "note.version_history"
+      ],
       "rubric": "Pioneer feature"
     }
   ]
