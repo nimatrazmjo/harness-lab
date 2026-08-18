@@ -314,6 +314,30 @@ not dispatchable pre-merge). This will self-resolve the first time this PR (or a
 containing the workflow file) merges to `main` — no grant needed, just document it so a future
 session doesn't re-diagnose it from scratch.
 
+**UPDATE after Step 8's grant landed and PR #9 merged:** `iam:SimulatePrincipalPolicy` worked
+immediately after the grant — confirmed `implicitDeny` for an unrelated ECR repo, `allowed` for
+`scribe-api`, `implicitDeny` for an untagged SSM target and for `iam:CreateUser` (no wildcard
+admin). But the `workflow_dispatch` self-resolve-on-merge theory above was **wrong** — even 2+
+minutes and repeated polling after merge, `gh workflow run oidc-smoke-test.yml` and the raw API
+dispatch endpoint both still returned `422 Workflow does not have 'workflow_dispatch' trigger`.
+Root cause appears to be that this specific workflow's GitHub-assigned ID (`337322200`) was
+first registered while the file only existed on a non-default branch, and GitHub's
+dispatch-eligibility cache for that ID never picked up the later merge — a real platform quirk,
+not a timing issue. **Working fix: use the `pull_request` trigger instead.** Opened a small
+real PR (#10) touching the workflow file — its `pull_request`-triggered run fired within
+seconds and worked correctly. If a future workflow's `workflow_dispatch` gets stuck the same
+way, don't keep polling — just exercise its `pull_request` (or other non-`workflow_dispatch`)
+trigger instead.
+
+Getting that PR #10 run fully green also surfaced 2 more real, unrelated bugs (full detail in
+`devops/progress.md`'s 2026-08-18 "found + fixed 3 real bugs" entry) — a YAML syntax error in
+the workflow (unquoted `run:` value containing `": "`, caught by `actionlint`, not by `gh run
+view --log` which gives no useful detail for parse-level failures) and a mismatch between the
+Terraform's assumed OIDC `sub`-claim format (`repo:owner/repo:...`) and what this GitHub account
+actually sends (`repo:owner@ownerID/repo@repoID:...` — immutable IDs baked into the default
+subject claim, confirmed by decoding a real ID token, not from docs). Both fixed; the smoke
+test now passes end-to-end for real.
+
 ---
 
 ## Log

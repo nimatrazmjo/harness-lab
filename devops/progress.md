@@ -14,15 +14,67 @@ purpose, so a product-coding session never has to load infra history into contex
 
 ## Current state
 
-`devops.dockerfile_api`, `devops.dockerfile_web`, and `devops.terraform_backend` are all
-`passing` and merged/committed to `main`. `devops.terraform_oidc_github` is **`blocked`**
-(2026-08-18, this session) — the OIDC provider + IAM role are real, applied, and correctly
-trust-scoped, but the feature's required verification proof isn't fully runnable yet (see
-below). `devops.terraform_ecr` remains unstarted, `dependsOn` this feature. The two
-AWS-account-blocked items (`terraform_networking_rds`, `terraform_compute_envs`) are
-unaffected/unchanged.
+`devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`, and
+`devops.terraform_oidc_github` are all `passing`. The first three are merged to `main`;
+`terraform_oidc_github`'s three real bug fixes (see log entry below) are on PR #10, pending
+merge. `devops.terraform_ecr` is next, now fully unblocked. The two AWS-account-blocked items
+(`terraform_networking_rds`, `terraform_compute_envs`) are unaffected/unchanged.
 
 ## Log
+
+### 2026-08-18 — devops.terraform_oidc_github: passing (found + fixed 3 real bugs to get there)
+
+Picked up from the entry below (infra was applied and correctly scoped, but the verify proof
+was incomplete). Getting the actual `oidc-smoke-test.yml` workflow to pass for real surfaced
+three genuine, unrelated bugs — each confirmed via a real failing run, not guessed:
+
+1. **YAML syntax error** (present since the workflow's creation, on every single run):
+   `run: aws ecr get-authorization-token ... && echo "OK: ecr:GetAuthorizationToken allowed"`
+   is an unquoted plain YAML scalar containing `": "` inside the embedded shell string — YAML's
+   plain-scalar rules break on that, regardless of the shell's own quoting. Every run since the
+   workflow was added had been failing at the parse stage with "workflow file issue" and a
+   misleading `push`-event label, which masked the real problem. Confirmed with `actionlint`
+   (installed via `brew install actionlint`) after `gh run view --log` gave no useful detail
+   for a parse-level failure. Fixed by converting both offending `run:` lines to block scalars
+   (`run: |`).
+2. **OIDC trust policy mismatched the actual `sub` claim.** Once the YAML parsed, role
+   assumption itself failed: `Not authorized to perform sts:AssumeRoleWithWebIdentity`. Added a
+   temporary debug step (`actions/github-script` decoding the real ID token) and found GitHub
+   sends `repo:nimatrazmjo@3712526/harness-lab@1332166375:pull_request` for this repo, not the
+   plain `repo:nimatrazmjo/harness-lab:pull_request` the Terraform assumed — confirmed via `gh
+   api repos/nimatrazmjo/harness-lab/actions/oidc/customization/sub`, which reports
+   `"use_default": true` yet the default `sub_claim_prefix` already bakes in immutable
+   owner_id/repo_id. This is apparently GitHub's current default for this account, not
+   something explicitly configured. Fixed `infra/terraform/main.tf`'s `github_oidc_sub_prefix`
+   local to the real value (with a comment explaining why, since it's non-obvious and would
+   silently break again if forked to a different account). **Applied to real AWS** with
+   explicit human confirmation (auto-mode's classifier flagged this one specifically since it's
+   an IAM trust-policy change) — `terraform apply`: `0 added, 1 changed, 0 destroyed`.
+3. **Smoke test's own credential check was backwards.** After the trust-policy fix, role
+   assumption succeeded but the very next step failed: `FAIL: a static AWS_ACCESS_KEY_ID is set
+   in this job`. This was the smoke test's own logic bug — `aws-actions/configure-aws-credentials`
+   always exports temporary STS credentials under the `AWS_ACCESS_KEY_ID` env var name
+   regardless of auth method (that's how the AWS CLI picks up any credential type), so "the env
+   var is set" proves nothing about staticness. Fixed the check to assert the actual
+   distinguishing signals instead: `AWS_SESSION_TOKEN` present + `AWS_ACCESS_KEY_ID` prefixed
+   `ASIA` (temporary) rather than `AKIA` (long-lived IAM user key). Removed the temporary debug
+   step once the trust-policy fix was confirmed.
+
+**Final real run, all green** (PR #10, run via a genuine `pull_request` trigger — not
+`workflow_dispatch`, which stayed stuck/undispatchable the whole session, apparently because
+this workflow's ID was first registered on a non-default branch and GitHub's dispatch-eligibility
+cache never picked up the merge to `main`; documented in `devops/manual.md` as a known quirk to
+route around via `pull_request` instead of fighting it): role assumed with zero static keys,
+temporary-credential check passed, in-scope `ecr:GetAuthorizationToken` and
+`ssm:DescribeInstanceInformation` both succeeded, out-of-scope ECR repo and `iam:ListUsers` both
+genuinely denied by AWS (not simulated). `aws iam simulate-principal-policy` (round 4's IAM
+grant, `devops/manual.md` Step 8) independently confirmed the same least-privilege scoping.
+
+`devops/feature-list.json` → `devops.terraform_oidc_github` `passing`. The 3 fixes above are on
+PR #10 (opened as a throwaway trigger-only PR, ended up carrying real fixes) — needs a normal
+merge like any other feature PR, not a close. Next: `devops.terraform_ecr` (Tier 0, now fully
+unblocked) — `devops-agent`'s `scribe-devops-infra` policy already has `EcrRepos`/`EcrAuth`
+statements from an earlier round, worth checking before assuming a fresh grant is needed.
 
 ### 2026-08-18 — devops.terraform_oidc_github: blocked (infra applied, verify proof incomplete)
 

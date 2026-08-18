@@ -34,18 +34,29 @@ jobs:
       - name: Confirm no static credentials + correct identity
         run: |
           set -euo pipefail
-          if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-            echo "FAIL: a static AWS_ACCESS_KEY_ID is set in this job — OIDC-only is required" >&2
+          # aws-actions/configure-aws-credentials always exports temporary STS credentials
+          # under AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN regardless of auth
+          # method — that's how the AWS CLI picks them up. Presence of AWS_ACCESS_KEY_ID alone
+          # does NOT indicate a static long-lived key. The real distinguishing signals: a
+          # temporary STS session key is prefixed "ASIA" (a static IAM user key is "AKIA") and
+          # is always paired with a session token; a static key never has one.
+          if [ -z "${AWS_SESSION_TOKEN:-}" ]; then
+            echo "FAIL: no AWS_SESSION_TOKEN present — this looks like a static credential, not an OIDC-derived temporary one" >&2
             exit 1
           fi
-          echo "OK: no static AWS_ACCESS_KEY_ID present"
+          case "${AWS_ACCESS_KEY_ID:-}" in
+            ASIA*) echo "OK: AWS_ACCESS_KEY_ID is ASIA-prefixed (temporary STS session key)" ;;
+            *) echo "FAIL: AWS_ACCESS_KEY_ID is not ASIA-prefixed — looks like a static key, not OIDC-derived" >&2; exit 1 ;;
+          esac
           aws sts get-caller-identity
 
       - name: In-scope action succeeds (ecr:GetAuthorizationToken)
-        run: aws ecr get-authorization-token --region us-east-1 >/dev/null && echo "OK: ecr:GetAuthorizationToken allowed"
+        run: |
+          aws ecr get-authorization-token --region us-east-1 >/dev/null && echo "OK: ecr:GetAuthorizationToken allowed"
 
       - name: In-scope action succeeds (ssm read-only, resource *)
-        run: aws ssm describe-instance-information --region us-east-1 >/dev/null && echo "OK: ssm:DescribeInstanceInformation allowed"
+        run: |
+          aws ssm describe-instance-information --region us-east-1 >/dev/null && echo "OK: ssm:DescribeInstanceInformation allowed"
 
       - name: Out-of-scope ECR repo is denied
         run: |
@@ -84,3 +95,5 @@ jobs:
             cat err2.log
             exit 1
           fi
+
+# trigger: re-touch to test pull_request-triggered OIDC assumption for real
