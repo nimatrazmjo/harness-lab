@@ -1,0 +1,71 @@
+# Sprint Contract — DevOps / CI-CD workstream
+
+An agreement written **before** a devops sprint starts and checked **after** it ends. A
+"sprint" here = one feature from `devops/feature-list.json` (they're intentionally large —
+provisioning real infra isn't always a one-sitting task, so a sprint may legitimately span
+sessions; `devops/session-handoff.md` carries it across).
+
+Its job is the same as the repo-root `sprint-contract.md`: pin down what "done" means **up
+front**, including exactly which `verify` commands will be run for real, so the sprint can't
+quietly get marked `passing` on a plan-only or mocked basis.
+
+**How to use:**
+
+- **Sprint start:** fill in _Active sprint_ and state it back before writing any Terraform/
+  Dockerfile/workflow. If you can't name the exact `verify` commands you'll run against the real
+  target, the task isn't understood yet — clarify first.
+- **Sprint end:** score the work against `devops/evaluator-rubric.md`. If it passes (or an
+  accepted CONDITIONAL), fold the outcome into `devops/progress.md` and overwrite this file for
+  the next sprint.
+
+---
+
+## Active sprint
+
+**Feature(s):** _none yet — fill this in before starting `devops.dockerfile_api` or
+`devops.dockerfile_web` (the two Tier 0 items that don't need AWS account access and can start
+immediately)._
+
+**Goal (one sentence):** _—_
+
+**Tier:** _—_ · **Branch:** _—_
+
+### Context (why this is the next real gap)
+
+_—_
+
+### The concrete approach (decided up front)
+
+_—_
+
+### Explicitly OUT of scope (do not touch this sprint)
+
+- Anything under `apps/api/src/**`, `apps/web/src/**`, `libs/**` — permanent no-touch zone for
+  this entire workstream (devops/AGENTS.md), not just this sprint.
+- Any devops feature not named above, even if adjacent/tempting.
+
+### Done conditions (testable — copy verbatim from the feature's `acceptance` in
+`devops/feature-list.json`)
+
+- [ ] _—_
+
+### Invariants that must still hold (devops/AGENTS.md non-negotiables + root AGENTS.md §2)
+
+- [ ] No static AWS credentials introduced.
+- [ ] No `latest` image tag introduced.
+- [ ] No-touch zone respected (`git diff` confirms nothing under `apps/*/src` or `libs/**`).
+- [ ] _feature-specific invariant, if any — e.g. RDS still private, SSE streaming still works_
+
+### Verification plan (the exact `verify` commands from `devops/feature-list.json`, and what
+counts as evidence for each)
+
+- [ ] _—_
+
+### Definition of done
+
+- [ ] Every _Done condition_ checked with evidence from the real target
+- [ ] Every `verify` command actually run, output recorded
+- [ ] `devops/evaluator-rubric.md` scored by a separate subagent/session — PASS or accepted
+      CONDITIONAL
+- [ ] `devops/feature-list.json` → `passing`; `devops/progress.md` + `devops/session-handoff.md`
+      updated

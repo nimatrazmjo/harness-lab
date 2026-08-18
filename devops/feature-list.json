@@ -1,0 +1,347 @@
+{
+    "meta": {
+        "project": "AI Clinical Scribe Platform — DevOps / CI-CD workstream",
+        "version": "1.0.0",
+        "purpose": "Companion to the repo-root /feature-list.json, NOT a rival source of truth — lives in devops/ specifically so it (and devops/AGENTS.md) only load into context when working in this directory, not on every product-coding session. Tracks containerization, IaC, and CI/CD — a distinct workstream whose priority order doesn't fit the root list's product tiers (Tier 0 airtight-core / Tier 1 differentiators / Tier 2 stretch). Cross-references the root list where relevant: this plan is the concrete path to unblock infra.rds_postgres_private and infra.ec2_nginx_tls, which have sat `blocked` there pending real AWS access.",
+        "howToUse": [
+            "Same discipline as feature-list.json: work top-down by tier, one feature at a time.",
+            "Do NOT start a Tier 1 item until every Tier 0 item is 'passing' — Tier 0 is the security/auth foundation everything else authenticates through.",
+            "Every acceptance criterion has a real, runnable verification command in `verify` — a feature moves to 'passing' only when that command actually succeeds, not when it 'looks right'. Record the command's output as evidence in progress.md.",
+            "Branch + PR per feature, same as the root list (see devops/AGENTS.md workflow rules). Infra changes additionally require a `terraform plan` posted in the PR before merge (see devops.ci_terraform_plan)."
+        ],
+        "statusLegend": {
+            "failing": "Not yet implemented, or verify command doesn't pass. Initial state for everything.",
+            "in_progress": "Being implemented right now.",
+            "passing": "verify command succeeds against the real target (real AWS, not a mock).",
+            "blocked": "Cannot proceed until a dependency (usually AWS account access) is resolved."
+        },
+        "tiers": {
+            "0": "FOUNDATION. Containerization + IaC bootstrap + federated auth + registries. Nothing in Tier 1/2 can run without this — no static AWS keys anywhere, ever.",
+            "1": "CI GATES. Every PR must pass these before merge is even possible: secret scan, image build, vulnerability scan. Gate quality, not yet touching real infra.",
+            "2": "CD PIPELINES. Push-on-main, deploy-on-main, rollback, and manual multi-env dispatch. Depends on Tier 0 (auth/registry) + Tier 1 (gates) being green.",
+            "3": "HARDENING. Stretch — automatic rollback on failed health check, Terraform plan-on-PR. Only after Tier 0-2 are solid."
+        },
+        "architectureDecision": "Docker Compose on EC2 (NOT ECS/Fargate) — chosen over a container-orchestrator migration because docs/ARCHITECTURE.md:54 and infra/DEPLOY.md already commit to EC2+nginx specifically for nginx's `proxy_buffering off` behavior, which scribe.generate_stream's SSE streaming (already `passing` in feature-list.json) depends on. An ALB in front of ECS would need that streaming behavior re-verified for no real benefit. Deploys/rollbacks run over AWS SSM Run Command (IAM-scoped, no SSH keys/bastion) rather than a container scheduler's rolling-update primitive.",
+        "environments": "dev / staging / prod, each its own EC2 instance + own RDS instance, provisioned via one parameterized Terraform module (workspaces/tfvars per env) rather than 3 duplicated feature entries — the acceptance criteria and verify commands are identical per environment.",
+        "invariantsRef": "AGENTS.md §2 still applies in full — especially [SECRETS] (no static AWS keys, ever — see devops.terraform_oidc_github) and [RDS-PRIVATE]."
+    },
+    "features": [
+        {
+            "id": "devops.dockerfile_api",
+            "tier": 0,
+            "title": "Production Dockerfile for apps/api",
+            "status": "failing",
+            "description": "Multi-stage Dockerfile for the NestJS API: build stage compiles TS, final stage is a slim runtime image, non-root user, base image pinned by digest (not a floating tag).",
+            "acceptance": [
+                "Multi-stage build — final image contains no dev dependencies, no TS source, no build tooling.",
+                "Base image pinned by sha256 digest, not `:latest` or a bare version tag.",
+                "Runs as a non-root user.",
+                "Image responds on GET /health once started."
+            ],
+            "verify": [
+                "docker build -t scribe-api:local -f apps/api/Dockerfile .",
+                "docker run -d --rm --name scribe-api-smoke -p 3099:3000 --env-file apps/api/.env.example -e AI_PROVIDER=mock scribe-api:local",
+                "curl -f http://localhost:3099/health && docker exec scribe-api-smoke whoami | grep -v root",
+                "docker stop scribe-api-smoke"
+            ],
+            "dependsOn": [],
+            "rubric": "DevOps: containerization — API"
+        },
+        {
+            "id": "devops.dockerfile_web",
+            "tier": 0,
+            "title": "Production Dockerfile for apps/web",
+            "status": "failing",
+            "description": "Multi-stage Dockerfile for the Vite/React app: build stage runs `vite build`, final stage serves the static bundle via a slim nginx image, non-root, digest-pinned.",
+            "acceptance": [
+                "Multi-stage build — final image is nginx serving only the built dist/, no node_modules or source.",
+                "Base image pinned by sha256 digest.",
+                "Runs as non-root (nginx-unprivileged or equivalent).",
+                "Serves index.html and proxies /api/* per infra/nginx.conf's existing rewrite rule."
+            ],
+            "verify": [
+                "docker build -t scribe-web:local -f apps/web/Dockerfile .",
+                "docker run -d --rm --name scribe-web-smoke -p 8099:8080 scribe-web:local",
+                "curl -f http://localhost:8099/ | grep -qi 'AI Clinical Scribe'",
+                "docker stop scribe-web-smoke"
+            ],
+            "dependsOn": [],
+            "rubric": "DevOps: containerization — web"
+        },
+        {
+            "id": "devops.terraform_backend",
+            "tier": 0,
+            "title": "Terraform remote state backend",
+            "status": "failing",
+            "description": "S3 bucket (versioned, encrypted) + DynamoDB lock table for Terraform state, bootstrapped once outside the main Terraform config to avoid a chicken-and-egg problem. Local state never committed.",
+            "acceptance": [
+                "State bucket has versioning + SSE enabled, blocks public access.",
+                "Lock table prevents concurrent apply (verified by a deliberate second `terraform apply` while one is in-flight).",
+                "`terraform init` in infra/terraform/ succeeds against the remote backend with no local .tfstate created."
+            ],
+            "verify": [
+                "cd infra/terraform && terraform init",
+                "terraform state list  # reachable, non-error even if empty",
+                "aws s3api get-bucket-versioning --bucket <state-bucket> | grep -q Enabled"
+            ],
+            "dependsOn": [],
+            "rubric": "DevOps: IaC foundation"
+        },
+        {
+            "id": "devops.terraform_oidc_github",
+            "tier": 0,
+            "title": "GitHub Actions federated AWS auth (OIDC, no static keys)",
+            "status": "failing",
+            "description": "IAM OIDC identity provider trusting token.actions.githubusercontent.com, plus an IAM role GitHub Actions assumes via aws-actions/configure-aws-credentials. Trust policy scoped to this repo and specific ref patterns (main, pull_request) — not org-wide. Policy is least-privilege: ecr:*  scoped to the two repos, ssm:SendCommand scoped to the deploy tag, no wildcard admin.",
+            "acceptance": [
+                "No AWS access key / secret key exists anywhere in GitHub secrets or the codebase — auth is 100% OIDC (AGENTS.md [SECRETS]).",
+                "Trust policy's `token.actions.githubusercontent.com:sub` condition is scoped to this specific repo, not `repo:*`.",
+                "Role policy denies anything outside {ECR push to the 2 named repos, SSM SendCommand to deploy-tagged instances, ECS/EC2 describe for smoke checks} — no `*` resource on a mutating action."
+            ],
+            "verify": [
+                "gh workflow run oidc-smoke-test.yml && gh run watch",
+                "# In the workflow: aws sts get-caller-identity must print the expected role ARN with no AWS_ACCESS_KEY_ID env var set anywhere in the job",
+                "aws iam simulate-principal-policy --policy-source-arn <role-arn> --action-names ecr:PutImage --resource-arns 'arn:aws:ecr:*:*:repository/unrelated-repo' | grep -q implicitDeny"
+            ],
+            "dependsOn": ["devops.terraform_backend"],
+            "rubric": "DevOps: federated auth, zero static credentials"
+        },
+        {
+            "id": "devops.terraform_ecr",
+            "tier": 0,
+            "title": "ECR repositories (api + web) with immutable tags",
+            "status": "failing",
+            "description": "Terraform-provisioned ECR repos for scribe-api and scribe-web. Tag immutability ON (a pushed tag can never be overwritten — this is what makes 'use the SHA, never latest' actually enforceable, not just a convention). Native ECR scan-on-push enabled as defense-in-depth alongside the Trivy CI gate. Lifecycle policy expires untagged images after 7 days.",
+            "acceptance": [
+                "Both repos have imageTagMutability = IMMUTABLE.",
+                "scanOnPush enabled on both.",
+                "Lifecycle policy expires untagged manifests >7 days old.",
+                "Pushing the same tag twice fails (proves immutability, not just configured)."
+            ],
+            "verify": [
+                "aws ecr describe-repositories --repository-names scribe-api scribe-web --query 'repositories[].imageTagMutability' | grep -c IMMUTABLE  # expect 2",
+                "docker push <account>.dkr.ecr.<region>.amazonaws.com/scribe-api:smoke-test-tag  # first push succeeds",
+                "docker push <account>.dkr.ecr.<region>.amazonaws.com/scribe-api:smoke-test-tag  # second push to same tag must be REJECTED"
+            ],
+            "dependsOn": ["devops.terraform_backend", "devops.terraform_oidc_github"],
+            "rubric": "DevOps: registry, immutable artifacts"
+        },
+        {
+            "id": "devops.terraform_networking_rds",
+            "tier": 0,
+            "title": "Terraform: VPC + private RDS (unblocks infra.rds_postgres_private)",
+            "status": "blocked",
+            "description": "VPC with private subnets for RDS, public/private split for the EC2 instances. RDS Postgres + pgvector, no public IP, SG accepts 5432 only from the compute SG. This is the real-AWS execution of feature-list.json's infra.rds_postgres_private, which has sat blocked on account access — flip that item to passing once this runs for real, don't duplicate its acceptance criteria here.",
+            "acceptance": [
+                "RDS has PubliclyAccessible = false.",
+                "RDS security group's only inbound rule is 5432 from the EC2 security group (source = SG reference, not a CIDR).",
+                "A connection attempt from outside the VPC times out / is refused.",
+                "pgvector extension enabled post-provision."
+            ],
+            "verify": [
+                "aws rds describe-db-instances --db-instance-identifier scribe-prod --query 'DBInstances[0].PubliclyAccessible'  # expect false",
+                "psql \"$DATABASE_URL\" -c 'SELECT 1' # from OUTSIDE the VPC — must fail/timeout",
+                "psql \"$DATABASE_URL\" -c \"SELECT * FROM pg_extension WHERE extname='vector'\" # from inside — must return a row"
+            ],
+            "dependsOn": ["devops.terraform_backend"],
+            "rubric": "DevOps: IaC — networking + database. Blocked on real AWS account access, same as infra.rds_postgres_private in feature-list.json."
+        },
+        {
+            "id": "devops.terraform_compute_envs",
+            "tier": 0,
+            "title": "Terraform: EC2 + nginx + TLS per environment, dev/staging/prod (unblocks infra.ec2_nginx_tls)",
+            "status": "blocked",
+            "description": "One parameterized Terraform module (workspace or tfvars per environment) provisioning an EC2 instance running Docker Compose (api container + nginx container, TLS via certbot or ACM-issued cert on an attached ALB-free nginx), for each of dev/staging/prod. IAM instance role scoped to Secrets Manager (that env's secret only) + SSM (to receive deploy commands) — no long-lived keys on disk. This is the real-AWS execution of feature-list.json's infra.ec2_nginx_tls.",
+            "acceptance": [
+                "3 environments provisioned (dev, staging, prod), each its own EC2 instance + SG (80/443 only) + IAM instance profile.",
+                "Node process never directly exposed on 80/443 — nginx container terminates TLS and proxies to the api container on a private Docker network.",
+                "nginx config carries forward `proxy_buffering off` / `X-Accel-Buffering: no` for the SSE generation endpoint (docs/ARCHITECTURE.md:28) — a regression here silently breaks scribe.generate_stream's streaming.",
+                "Cert is CA-issued (Let's Encrypt via certbot), not self-signed.",
+                "Instance is reachable via SSM Session Manager, not open SSH (port 22 closed in the SG)."
+            ],
+            "verify": [
+                "for env in dev staging prod; do terraform workspace select $env && terraform apply -auto-approve; done",
+                "curl -sI https://<env>.scribe.example.com | grep -q 'HTTP/2 200'",
+                "openssl s_client -connect <env>.scribe.example.com:443 -servername <env>.scribe.example.com </dev/null 2>/dev/null | openssl x509 -noout -issuer | grep -v 'CN = <env>.scribe.example.com'  # not self-signed",
+                "curl -N https://<env>.scribe.example.com/api/encounters/<id>/scribe/generate ... | ts '%.s'  # confirm chunks arrive over time, not buffered as one blob",
+                "nmap -p 22 <env-ec2-public-ip>  # expect closed/filtered, not open"
+            ],
+            "dependsOn": ["devops.terraform_networking_rds", "devops.dockerfile_api", "devops.dockerfile_web"],
+            "rubric": "DevOps: IaC — compute + TLS + SSE-safety regression check. Blocked on real AWS account access, same as infra.ec2_nginx_tls in feature-list.json."
+        },
+        {
+            "id": "devops.ci_secret_scan",
+            "tier": 1,
+            "title": "CI: hardcoded-secret scan as a required PR check",
+            "status": "failing",
+            "description": "Promotes the existing scripts/check-no-committed-secrets.sh (gitleaks, currently a local/manual script backing infra.env_secrets) into an actual required GitHub Actions check on every PR — not just something an agent is supposed to remember to run.",
+            "acceptance": [
+                "gitleaks (or equivalent) runs on every PR via GitHub Actions.",
+                "The check is a required status check — a PR cannot merge while it's red, enforced by branch protection.",
+                "A PR containing a deliberately fake AWS-shaped key string fails the check."
+            ],
+            "verify": [
+                "git checkout -b test/secret-scan-smoke && echo 'AKIAABCDEFGHIJKLMNOP' >> scratch.txt && git commit -am test && git push",
+                "gh pr create --fill && gh pr checks  # secret-scan job must show failure",
+                "gh api repos/:owner/:repo/branches/main/protection | jq '.required_status_checks.contexts' | grep -q secret-scan"
+            ],
+            "dependsOn": [],
+            "rubric": "DevOps: CI security gate — secrets"
+        },
+        {
+            "id": "devops.ci_build_images",
+            "tier": 1,
+            "title": "CI: build both images on every PR (not pushed)",
+            "status": "failing",
+            "description": "GitHub Actions builds scribe-api and scribe-web via Docker Buildx on every PR, with layer caching, purely to validate the Dockerfiles compile — nothing is pushed to a registry from a PR build.",
+            "acceptance": [
+                "Both images build successfully on every PR.",
+                "Build uses layer caching (GHA cache backend) so PR builds aren't full-cold every time.",
+                "No push step runs on a PR — push only happens from devops.cd_push_ecr_main, on main."
+            ],
+            "verify": [
+                "gh pr checks  # build-api and build-web jobs both green",
+                "gh run view <run-id> --log | grep -qv 'docker push'  # confirm no push happened on a PR run"
+            ],
+            "dependsOn": ["devops.dockerfile_api", "devops.dockerfile_web"],
+            "rubric": "DevOps: CI — build validation"
+        },
+        {
+            "id": "devops.ci_image_scan_trivy",
+            "tier": 1,
+            "title": "CI: Trivy vulnerability scan on both built images",
+            "status": "failing",
+            "description": "Trivy scans both PR-built images for CRITICAL/HIGH CVEs. Job fails the PR if any are found, with an explicit, reviewed allowlist mechanism (a .trivyignore entry requires a comment linking to why it's accepted) for genuine false positives — not a blanket suppression.",
+            "acceptance": [
+                "Trivy runs against both images on every PR, after devops.ci_build_images.",
+                "Job fails on any CRITICAL or HIGH severity finding not explicitly allowlisted.",
+                "A PR built from a deliberately outdated/vulnerable base image fails the check; the real Dockerfiles pass."
+            ],
+            "verify": [
+                "trivy image --exit-code 1 --severity CRITICAL,HIGH --ignorefile .trivyignore scribe-api:local  # expect exit 0 on the real Dockerfile",
+                "docker build -t scribe-api:vuln-test -f - . <<< 'FROM node:18.0.0'  # ancient base",
+                "trivy image --exit-code 1 --severity CRITICAL,HIGH scribe-api:vuln-test  # expect non-zero exit"
+            ],
+            "dependsOn": ["devops.ci_build_images"],
+            "rubric": "DevOps: CI security gate — image vulnerabilities"
+        },
+        {
+            "id": "devops.cd_push_ecr_main",
+            "tier": 2,
+            "title": "CD: push SHA-tagged images to ECR on merge to main",
+            "status": "failing",
+            "description": "On merge to main only (never on a PR build), after devops.ci_secret_scan + devops.ci_image_scan_trivy are both green: authenticate to AWS via OIDC (devops.terraform_oidc_github), build, tag with the immutable git SHA, push to ECR (devops.terraform_ecr). `latest` is never used as a tag anywhere in this pipeline.",
+            "acceptance": [
+                "Push only triggers on push-to-main, gated on the secret-scan and image-scan jobs having passed for that commit.",
+                "Image tag is the git SHA (short or full) — grep the whole workflow file, `latest` must not appear as a tag value.",
+                "Auth uses the OIDC role, zero AWS_ACCESS_KEY_ID/SECRET anywhere in the job."
+            ],
+            "verify": [
+                "git log -1 --format=%H  # note the SHA",
+                "aws ecr describe-images --repository-name scribe-api --image-ids imageTag=<sha>  # succeeds",
+                "aws ecr list-images --repository-name scribe-api --query 'imageIds[].imageTag' | grep -v latest  # 'latest' must not appear"
+            ],
+            "dependsOn": ["devops.terraform_ecr", "devops.ci_secret_scan", "devops.ci_image_scan_trivy"],
+            "rubric": "DevOps: CD — immutable artifact publishing"
+        },
+        {
+            "id": "devops.cd_deploy_prod_on_main",
+            "tier": 2,
+            "title": "CD: auto-deploy to production on main, via SSM",
+            "status": "failing",
+            "description": "After devops.cd_push_ecr_main succeeds, GitHub Actions sends an SSM RunCommand to the prod EC2 instance: pull the new SHA-tagged image, `docker compose up -d --no-deps api`, then a post-deploy smoke test hits /health and a real SSE generate call to confirm streaming still works before declaring success.",
+            "acceptance": [
+                "Deploy triggers automatically after a successful ECR push from main — no manual step.",
+                "Deploy runs over SSM RunCommand, not SSH.",
+                "Post-deploy smoke test checks /health AND that scribe.generate_stream still yields multiple chunks over time (regression guard for the nginx buffering concern).",
+                "A failed smoke test fails the workflow run visibly (does not silently report success)."
+            ],
+            "verify": [
+                "gh run list --workflow=deploy-prod.yml --limit 1  # latest run status",
+                "aws ssm list-command-invocations --command-id <id> --details | jq '.CommandInvocations[0].Status'  # Success",
+                "curl -f https://prod.scribe.example.com/health",
+                "curl -N https://prod.scribe.example.com/api/encounters/<id>/scribe/generate ... | ts '%.s'  # multiple timestamped chunks, not one blob"
+            ],
+            "dependsOn": ["devops.cd_push_ecr_main", "devops.terraform_compute_envs"],
+            "rubric": "DevOps: CD — automated production deploy with a real smoke test, not a self-report"
+        },
+        {
+            "id": "devops.cd_rollback",
+            "tier": 2,
+            "title": "CD: rollback workflow to a previous or specific image tag",
+            "status": "failing",
+            "description": "A separate workflow_dispatch workflow (not the main-branch push pipeline) taking an `image_tag` input (defaults to the previous successfully-deployed SHA, read from a small deploy-history record written by devops.cd_deploy_prod_on_main). Re-points the target environment's containers to that tag via the same SSM mechanism — no rebuild.",
+            "acceptance": [
+                "Triggerable via `gh workflow run rollback.yml -f environment=prod -f image_tag=<sha>` with no code change required.",
+                "Defaults to 'previous successful deploy' when image_tag is omitted, read from recorded deploy history (not guessed).",
+                "Same post-deploy smoke test as devops.cd_deploy_prod_on_main runs after rollback."
+            ],
+            "verify": [
+                "gh workflow run rollback.yml -f environment=prod -f image_tag=<older-sha>",
+                "gh run watch",
+                "aws ssm list-command-invocations --command-id <id> | jq '.CommandInvocations[0].Status'  # Success",
+                "curl -f https://prod.scribe.example.com/health"
+            ],
+            "dependsOn": ["devops.cd_deploy_prod_on_main"],
+            "rubric": "DevOps: CD — rollback without a rebuild"
+        },
+        {
+            "id": "devops.cd_manual_dispatch_multi_env",
+            "tier": 2,
+            "title": "CD: manual multi-environment dispatch (dev/staging/prod)",
+            "status": "failing",
+            "description": "A workflow_dispatch workflow with `environment` (dev/staging/prod) and `image_tag` inputs, deploying a specified already-built image to a specified environment outside the main-merge path — e.g. deploying a feature-branch build to staging for review, or re-deploying an old tag to dev. Production runs through this path additionally require a GitHub Environment protection rule (manual approval), since it bypasses the CI-gated main-branch flow.",
+            "acceptance": [
+                "One workflow, parameterized by environment + image_tag, targets the correct environment's EC2 instance via SSM (never cross-deploys to the wrong env).",
+                "dev and staging deploy immediately on dispatch.",
+                "prod additionally requires a manual approval (GitHub Environments protection rule) before the SSM command fires — verify by confirming the run pauses in 'Waiting' state.",
+                "Deploying a tag that was never pushed to ECR fails cleanly with a clear error, not a silent no-op."
+            ],
+            "verify": [
+                "gh workflow run manual-deploy.yml -f environment=dev -f image_tag=<sha> && gh run watch  # deploys immediately",
+                "gh workflow run manual-deploy.yml -f environment=prod -f image_tag=<sha>; gh run view <run-id>  # status shows 'waiting' pending approval",
+                "gh workflow run manual-deploy.yml -f environment=dev -f image_tag=does-not-exist; gh run view <run-id> --log | grep -qi 'not found'"
+            ],
+            "dependsOn": ["devops.cd_push_ecr_main", "devops.terraform_compute_envs"],
+            "rubric": "DevOps: CD — manual multi-environment dispatch with a real approval gate on prod"
+        },
+        {
+            "id": "devops.deploy_health_gate",
+            "tier": 3,
+            "title": "Stretch: automatic rollback on failed post-deploy health check",
+            "status": "failing",
+            "description": "If devops.cd_deploy_prod_on_main's post-deploy smoke test fails, automatically trigger devops.cd_rollback to the previous known-good tag instead of just failing the workflow and leaving prod broken.",
+            "acceptance": [
+                "A deliberately broken deploy (e.g. a build that fails /health) triggers an automatic rollback within N minutes, no human action required.",
+                "The auto-rollback is itself logged/notified (not silent) so a human knows it happened."
+            ],
+            "verify": [
+                "# deploy a deliberately broken image tag to a test environment",
+                "gh workflow run deploy-prod.yml -f image_tag=<broken-sha>",
+                "gh run watch  # expect: smoke test fails -> rollback job triggers automatically -> environment ends healthy on the prior tag",
+                "curl -f https://<env>.scribe.example.com/health  # healthy again post-auto-rollback"
+            ],
+            "dependsOn": ["devops.cd_deploy_prod_on_main", "devops.cd_rollback"],
+            "rubric": "DevOps: resilience — stretch"
+        },
+        {
+            "id": "devops.ci_terraform_plan",
+            "tier": 3,
+            "title": "Stretch: terraform plan posted on infra PRs, apply only on merge",
+            "status": "failing",
+            "description": "Any PR touching infra/terraform/** runs `terraform plan` in CI and posts the plan output as a PR comment for human review. `terraform apply` only ever runs from a GitHub Actions job on merge to main, never from a local machine.",
+            "acceptance": [
+                "A PR changing a .tf file gets an automatic plan-output comment.",
+                "No `terraform apply` credentials/capability exist outside the main-branch CI job.",
+                "A PR that doesn't touch infra/terraform/** does not trigger a plan run (path-filtered)."
+            ],
+            "verify": [
+                "gh pr create --fill  # on a branch with a .tf change",
+                "gh pr view --json comments | jq '.comments[].body' | grep -q 'Terraform Plan'",
+                "git diff --name-only main -- infra/terraform/  # sanity check the trigger path filter matches what changed"
+            ],
+            "dependsOn": ["devops.terraform_backend"],
+            "rubric": "DevOps: IaC review discipline — stretch"
+        }
+    ]
+}
