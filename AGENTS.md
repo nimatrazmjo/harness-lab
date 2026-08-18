@@ -17,7 +17,8 @@
 >    `clean-state-checklist.md`.
 > 2. **Orient:** skim `progress.md` (where we've been), `docs/PRODUCT.md` + `docs/ARCHITECTURE.md`
 >    (what/why + how), `feature-list.json` (what's next, by tier), and `BUILD-CHECKLIST.md`
->    (the phased build order and each phase's "Done when" gate).
+>    (the phased build order and each phase's "Done when" gate). Working on containers/Terraform/
+>    CI-CD? Use `/devops` instead — own isolated workstream, see `devops/AGENTS.md` (§5).
 > 3. **Work** the next `failing` feature (see §5), or resume the in-flight one from the handoff.
 > 4. **Hand off:** run the _Leave clean_ gate in `clean-state-checklist.md`, then **overwrite**
 >    `session-handoff.md` with the current snapshot, prepend a dated entry to `progress.md`, and
@@ -102,6 +103,9 @@ progress.md        # rolling log: durable, append-only history (append at sessio
 session-handoff.md # warm baton-pass: overwritten each session, read first to resume
 clean-state-checklist.md # start-clean / leave-clean gates run at both ends of a session
 feature-list.json  # the prioritized, tier-ordered source of truth (work top-down)
+devops/             # SEPARATE, on-demand workstream (containers/Terraform/CI-CD) — its own
+                    # AGENTS.md + feature-list.json, invoked via the `/devops` skill so it never
+                    # loads into a normal product-coding session. See §5.
 BUILD-CHECKLIST.md # phased day-by-day build sequence — the concrete order to work the tiers in
 sprint-contract.md # per-feature "done" agreed BEFORE coding (prevents scope drift)
 evaluator-rubric.md # adversarial scorecard applied AFTER coding (separate eval pass)
@@ -159,6 +163,13 @@ verbose.**
 - Schema changes go through a migration (`pnpm db:migrate`). Never hand-edit the DB or a
   generated migration after it's applied.
 - After finishing a feature, update its `status` in `feature-list.json` in the same commit.
+- **DevOps work (containers, Terraform, CI/CD) is a separate, on-demand workstream — invoke
+  `/devops`, don't work it inline here.** It has its own harness contract (`devops/AGENTS.md`)
+  so infra detail never loads into a normal product-coding session. Its Tier 0 items
+  (`devops.terraform_networking_rds`, `devops.terraform_compute_envs`) are the real-AWS
+  execution of this file's `infra.rds_postgres_private` / `infra.ec2_nginx_tls` — flip those two
+  to `passing` once the devops workstream verifies them for real; don't duplicate acceptance
+  criteria in both places.
 
 ---
 
