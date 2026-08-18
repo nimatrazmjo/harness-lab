@@ -42,10 +42,12 @@ jobs:
           aws sts get-caller-identity
 
       - name: In-scope action succeeds (ecr:GetAuthorizationToken)
-        run: aws ecr get-authorization-token --region us-east-1 >/dev/null && echo "OK: ecr:GetAuthorizationToken allowed"
+        run: |
+          aws ecr get-authorization-token --region us-east-1 >/dev/null && echo "OK: ecr:GetAuthorizationToken allowed"
 
       - name: In-scope action succeeds (ssm read-only, resource *)
-        run: aws ssm describe-instance-information --region us-east-1 >/dev/null && echo "OK: ssm:DescribeInstanceInformation allowed"
+        run: |
+          aws ssm describe-instance-information --region us-east-1 >/dev/null && echo "OK: ssm:DescribeInstanceInformation allowed"
 
       - name: Out-of-scope ECR repo is denied
         run: |
