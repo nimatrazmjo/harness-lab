@@ -1,0 +1,7 @@
+# This config intentionally uses LOCAL state (see main.tf header comment) — never commit it.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.tfplan
+crash.log
+crash.*.log

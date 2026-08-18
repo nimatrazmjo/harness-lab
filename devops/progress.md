@@ -14,13 +14,91 @@ purpose, so a product-coding session never has to load infra history into contex
 
 ## Current state
 
-`devops.dockerfile_api` and `devops.dockerfile_web` are both `passing` and merged to `main`
-(2026-08-18) — `apps/api/Dockerfile` and `apps/web/Dockerfile` built and smoke-tested for
-real. All Tier 0 items needing no AWS access are done — only the two AWS-account-blocked items
-(`terraform_networking_rds`, `terraform_compute_envs`) plus three unblocked-but-needs-real-AWS
-items (`terraform_backend`, `terraform_oidc_github`, `terraform_ecr`) remain in Tier 0.
+`devops.dockerfile_api` and `devops.dockerfile_web` are both `passing` and merged to `main`.
+`devops.terraform_backend` is now `blocked` — Terraform config is fully written and ready
+(`infra/terraform-bootstrap/`, `infra/terraform/backend.tf`+`provider.tf`+`main.tf`) but the
+`devops-agent` IAM user does not have `s3:CreateBucket` / `dynamodb:CreateTable` (real
+`AccessDenied` from AWS, confirmed 2026-08-18 — see log entry below). `terraform_oidc_github`
+and `terraform_ecr` both `dependsOn` this and stay `failing`/blocked-by-extension until the
+IAM policy is widened and the bootstrap apply actually succeeds. The two AWS-account-blocked
+items (`terraform_networking_rds`, `terraform_compute_envs`) are unaffected/unchanged.
 
 ## Log
+
+### 2026-08-18 — devops.terraform_backend: blocked (IAM permissions, not toolchain)
+
+**What was authorized:** explicit human go-ahead this session to provision a real S3 bucket
+(`scribe-terraform-state-404063516240`) + DynamoDB table (`scribe-terraform-locks`) via the
+`devops-agent` IAM profile, and to run `terraform apply` locally ONCE as the documented
+bootstrap exception to "terraform apply only ever runs from CI on merge to main" (per
+devops/AGENTS.md + devops/clean-state-checklist.md — this is that logged exception).
+
+**What was built (all committed, ready to apply once unblocked):**
+- `infra/terraform-bootstrap/main.tf` — standalone config, intentionally LOCAL state
+  (gitignored via its own `.gitignore`), creates the S3 bucket (versioning Enabled, SSE-S3
+  AES256 with `bucket_key_enabled`, full `aws_s3_bucket_public_access_block` — all four flags
+  true) + `aws_dynamodb_table.terraform_locks` (PAY_PER_REQUEST, hash key `LockID`, the classic
+  Terraform S3-backend locking schema).
+- `infra/terraform/backend.tf` — `backend "s3"` block pointing at that bucket/table (key
+  `scribe/terraform.tfstate`, region `us-east-1`, `encrypt = true`). Note: Terraform 1.15.8
+  warns `dynamodb_table` is deprecated in favor of `use_lockfile` (native S3 locking, 1.10+) —
+  kept `dynamodb_table` deliberately because the feature's acceptance criteria explicitly
+  requires a DynamoDB lock table verified by a real concurrent-apply test, not S3-native
+  locking. Revisit if that requirement ever changes.
+- `infra/terraform/provider.tf`, `infra/terraform/main.tf` (placeholder — no resources yet,
+  those come with `terraform_oidc_github`/`terraform_ecr`/later items).
+- Root `.gitignore` gained standard Terraform entries (`**/.terraform/`, `*.tfstate*`,
+  `*.tfplan`, override files) — no local `.tfstate` is ever committable now, satisfying
+  acceptance criterion 3 structurally even though the bucket itself doesn't exist yet.
+
+**What was actually run (real AWS, `AWS_PROFILE=devops-agent`):**
+1. `terraform init` in `infra/terraform-bootstrap/` — succeeded (installed `hashicorp/aws
+   ~> 5.0`, local backend).
+2. `terraform plan` — clean, 5 resources to add (bucket, versioning, SSE config, public-access
+   block, DynamoDB table), 0 to change/destroy.
+3. `terraform apply "bootstrap.tfplan"` — **FAILED**, real AWS `AccessDenied`:
+   ```
+   Error: creating S3 Bucket (scribe-terraform-state-404063516240): ... StatusCode: 403 ...
+   AccessDenied: User: arn:aws:iam::404063516240:user/devops-agent is not authorized to
+   perform: s3:CreateBucket on resource: "arn:aws:s3:::scribe-terraform-state-404063516240"
+
+   Error: creating AWS DynamoDB Table (scribe-terraform-locks): ... StatusCode: 400 ...
+   AccessDeniedException: User: arn:aws:iam::404063516240:user/devops-agent is not authorized
+   to perform: dynamodb:CreateTable on resource:
+   arn:aws:dynamodb:us-east-1:404063516240:table/scribe-terraform-locks
+   ```
+4. Confirmed no partial/orphan resources: `aws s3api head-bucket` → 404 Not Found (bucket does
+   not exist); `terraform state list` shows only the `aws_caller_identity` data source, no real
+   resources in state. Nothing to tear down.
+5. `cd infra/terraform && terraform init` against the S3 backend — **FAILED as expected** (the
+   bucket genuinely doesn't exist yet): `Error: Failed to get existing workspaces: S3 bucket
+   "scribe-terraform-state-404063516240" does not exist.` This confirms acceptance criterion 3
+   is not yet met — correctly reported as such, not faked.
+6. Tried to self-diagnose the IAM user's actual policy (`iam:ListAttachedUserPolicies`,
+   `iam:ListUserPolicies`, `iam:ListGroupsForUser`) — all three also `AccessDenied`. The
+   `devops-agent` user cannot even introspect its own permissions; account owner needs to check
+   the IAM console/CloudTrail directly.
+
+**Minimal fix needed (for whoever grants IAM):** attach a policy to `devops-agent` allowing at
+least `s3:CreateBucket`, `s3:PutBucketVersioning`, `s3:PutBucketPublicAccessBlock`,
+`s3:PutEncryptionConfiguration`, `s3:GetBucket*`, `s3:ListBucket`, `s3:GetObject`,
+`s3:PutObject`, `s3:DeleteObject` (scoped to `arn:aws:s3:::scribe-terraform-state-*` and its
+objects) + `dynamodb:CreateTable`, `dynamodb:DescribeTable`, `dynamodb:GetItem`,
+`dynamodb:PutItem`, `dynamodb:DeleteItem` (scoped to
+`arn:aws:dynamodb:us-east-1:404063516240:table/scribe-terraform-locks`) — the last four are
+what the S3 backend itself needs at every `terraform init`/`plan`/`apply`, not just bootstrap.
+
+**Not done, deliberately:** did not attempt `AWS_PROFILE=default` (root — hard-blocked and
+explicitly forbidden), did not modify IAM policy myself (out of scope, and `devops-agent`
+can't even read its own policy), did not fake `passing`. Status left `blocked` in
+`devops/feature-list.json`. `terraform_oidc_github` / `terraform_ecr` remain `failing` (both
+`dependsOn: ["devops.terraform_backend"]`) — don't start those until this unblocks.
+
+**Invariants held:** no static AWS credential written anywhere (the one local apply used the
+pre-existing `devops-agent` profile, not a new key); no `latest` tag (n/a, no images touched);
+no-touch zone respected (`git diff --stat` confirms nothing under `apps/*/src`, `apps/web/src`,
+or `libs/**`); the one local `terraform apply` is this very log entry — the documented
+exception, not a violation.
 
 ### 2026-08-18 — devops.dockerfile_web: passing
 Multi-stage `apps/web/Dockerfile`, sibling to the just-finished `devops.dockerfile_api`.
