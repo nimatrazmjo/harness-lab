@@ -83,14 +83,74 @@ blocked` in `devops/feature-list.json`, not faked `passing`. Branch
 
 ## Active sprint
 
-**Feature(s):** _none — `devops.terraform_ecr` is `blocked` on the `ecr:TagResource` IAM grant
-(see above), not resumable by an agent alone. Next `/devops` session should first check
-whether Step 9's grant landed; if not, there is no unblocked Tier 0 item left to work — flag
-that back to the user rather than jumping to Tier 1._
+**Feature(s):** `devops.ci_secret_scan` — explicitly dispatched this session (has
+`dependsOn: []`, so it does not require blocked Tier 0 items to unblock first; GitHub-side
+only, no AWS resources touched).
 
-**Goal (one sentence):** _—_
+**Goal (one sentence):** Add a `gitleaks/gitleaks-action`-based GitHub Actions workflow that
+runs on every PR and make it a required branch-protection status check on `main`, so a PR
+containing a hardcoded secret cannot merge.
 
-**Tier:** _—_ · **Branch:** _—_
+**Tier:** 1 · **Branch:** `feat/devops-ci-secret-scan`
+
+### Context
+
+`scripts/check-no-committed-secrets.sh` already exists locally (uses `gitleaks detect` if
+installed, else a regex fallback for AWS-key-shaped strings / private-key headers / an
+`.env` being tracked) — it backs `infra.env_secrets` but is only ever run manually. This
+sprint promotes the same idea (gitleaks) into CI via the official `gitleaks/gitleaks-action`,
+which runs `gitleaks detect` against the PR diff using gitleaks' own default ruleset
+(includes an AWS access key ID rule matching `AKIA[0-9A-Z]{16}`, which covers the required
+smoke-test string). Not reusing the shell script directly in CI — the action is the standard,
+maintained way to run gitleaks in GitHub Actions and needs no extra install step.
+
+### Explicitly OUT of scope this sprint
+
+- Any resource under `apps/api/src/**`, `apps/web/src/**`, `libs/**` — permanent no-touch zone.
+- `devops.ci_build_images` / `devops.ci_image_scan_trivy` — separate Tier 1 features, not
+  touched here.
+- Any branch-protection setting beyond the one required status check (no required reviews, no
+  linear history, no push restrictions) — explicit instruction, this is shared repo-wide state.
+- No AWS resources created/modified — this feature is 100% GitHub-side.
+
+### Done conditions (copied verbatim from `devops/feature-list.json` acceptance)
+
+- [ ] gitleaks (or equivalent) runs on every PR via GitHub Actions.
+- [ ] The check is a required status check — a PR cannot merge while it's red, enforced by
+      branch protection on `main`.
+- [ ] A PR containing a deliberately fake AWS-shaped key string fails the check.
+
+### Verification plan (real commands, run for real)
+
+- [ ] `actionlint .github/workflows/secret-scan.yml` — clean before pushing.
+- [ ] `gh api repos/:owner/:repo/branches/main/protection` — checked BEFORE any change (confirm
+      starting state: none existed).
+- [ ] `gh api -X PUT repos/:owner/:repo/branches/main/protection ...` — add only
+      `required_status_checks.contexts` containing the secret-scan job's context name.
+- [ ] Real smoke PR: branch off this feature branch (it must already contain
+      `secret-scan.yml` — a PR based on `main` alone won't trigger it pre-merge), commit a file
+      containing an AWS-access-key-ID-shaped string (redacted here on purpose so this doc itself
+      doesn't trip the scanner), push, `gh pr create --fill`, `gh pr checks` — secret-scan job
+      must show failure.
+- [ ] `gh api repos/:owner/:repo/branches/main/protection | jq '.required_status_checks.contexts'
+      | grep -q secret-scan`.
+- [ ] Clean up: close the smoke-test PR without merging, delete the branch (local + remote).
+
+### Invariants that must still hold
+
+- [ ] No static AWS credentials introduced anywhere (n/a — no AWS calls in this workflow).
+- [ ] No-touch zone respected (`git diff` confirms nothing under `apps/*/src` or `libs/**`).
+- [ ] Branch protection change is surgical — only the one required check added, nothing else
+      enabled.
+- [ ] Test PR containing the fake secret is closed (not merged) and its branch deleted after
+      the check is proven to fail.
+
+### Definition of done
+
+- [ ] Every Done condition checked with real evidence.
+- [ ] Every verify command actually run, output recorded.
+- [ ] `devops/feature-list.json` → `passing` (or left `blocked`/`failing` with exact reason).
+- [ ] `devops/progress.md` + `devops/session-handoff.md` + this file updated in the same commit.
 
 ---
 
