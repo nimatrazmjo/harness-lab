@@ -17,8 +17,18 @@ data "aws_caller_identity" "current" {}
 # ---------------------------------------------------------------------------
 
 locals {
-  github_org_repo = "nimatrazmjo/harness-lab"
-  ecr_repo_names  = ["scribe-api", "scribe-web"]
+  # This repo's actual OIDC subject-claim prefix, confirmed via
+  # `gh api repos/nimatrazmjo/harness-lab/actions/oidc/customization/sub` — NOT the plain
+  # "repo:nimatrazmjo/harness-lab" format most AWS OIDC tutorials assume. GitHub's default sub
+  # claim for this account bakes in immutable owner_id/repo_id (@3712526 / @1332166375) even
+  # with no explicit customization configured ("use_default": true, "use_immutable_subject":
+  # false, yet the reported sub_claim_prefix already has the IDs). These IDs are stable across
+  # repo renames/transfers (that's the point of immutable IDs) so hardcoding them here is safe,
+  # but if this Terraform is ever forked to a different GitHub account/repo, re-run that `gh
+  # api` command and update this value — a plain "repo:owner/repo" trust condition will silently
+  # never match and every OIDC role-assumption will fail with a generic AccessDenied.
+  github_oidc_sub_prefix = "repo:nimatrazmjo@3712526/harness-lab@1332166375"
+  ecr_repo_names         = ["scribe-api", "scribe-web"]
 }
 
 # GitHub's OIDC token endpoint. Fetch the TLS root CA thumbprint dynamically (Terraform's
@@ -58,15 +68,14 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
     }
 
     # Scoped to THIS repo only, and only for: pushes to main, and any pull_request event.
-    # `repo:<org>/<repo>:ref:refs/heads/main` covers push-to-main; `repo:<org>/<repo>:pull_request`
-    # covers PR-triggered runs. Deliberately NOT `repo:*` and NOT a bare `repo:<org>/<repo>:*`
+    # covers PR-triggered runs. Deliberately NOT `repo:*` and NOT a bare prefix-only
     # wildcard that would also cover arbitrary branches/tags/environments.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
       values = [
-        "repo:${local.github_org_repo}:ref:refs/heads/main",
-        "repo:${local.github_org_repo}:pull_request",
+        "${local.github_oidc_sub_prefix}:ref:refs/heads/main",
+        "${local.github_oidc_sub_prefix}:pull_request",
       ]
     }
   }
