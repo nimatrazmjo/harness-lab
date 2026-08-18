@@ -35,11 +35,10 @@ in this sprint's smoke test). No static AWS creds, no `latest` tag, no-touch zon
 
 ## Active sprint
 
-**Feature(s):** _none yet — both Tier 0 Dockerfile items are now `passing` (each on its own
-unmerged branch/PR, see `devops/session-handoff.md`). Next real candidate:
-`devops.terraform_backend` (S3 + DynamoDB state backend) — needs real AWS provisioning
-(confirmed available via the `devops-agent` profile this session), so get explicit user
-go-ahead before starting, unlike the Dockerfile items which were fully local._
+**Feature(s):** _none yet — both Tier 0 Dockerfile items are now `passing` and merged to
+`main`. Next real candidate: `devops.terraform_backend` (S3 + DynamoDB state backend) — needs
+real AWS provisioning (confirmed available via the `devops-agent` profile this session), so get
+explicit user go-ahead before starting, unlike the Dockerfile items which were fully local._
 
 **Goal (one sentence):** _—_
 
@@ -84,3 +83,17 @@ counts as evidence for each)
       CONDITIONAL
 - [ ] `devops/feature-list.json` → `passing`; `devops/progress.md` + `devops/session-handoff.md`
       updated
+
+---
+
+## Prior sprint outcome — devops.dockerfile_api (2026-08-18)
+
+All four Done conditions met with real evidence; all four literal `verify` commands run
+end-to-end and green (build exit 0, container stays up, `curl -f /health` → `{"status":"ok",
+"db":true}`, `whoami` → `node`, clean `docker stop`); extra evidence for "no TS source"
+(`find -name '*.ts' -not -name '*.d.ts'` inside the image → empty) and "no dev dependencies"
+(`typescript`/`jest`/`ts-node` absent from final `node_modules`). No static AWS creds, no
+`latest` tag, no-touch zone respected (`git diff` confirms nothing under `apps/*/src` or
+`libs/**`), `apps/api/.env.example` holds only placeholder/local-compose values. Full detail:
+`devops/progress.md` (2026-08-18 entry) and `devops/session-handoff.md`. Status flipped to
+`passing` in `devops/feature-list.json`, committed on `feat/devops-dockerfile-api`.
