@@ -16,7 +16,8 @@
 >    build new work on a broken baseline. Then complete the rest of the _Start clean_ gate in
 >    `clean-state-checklist.md`.
 > 2. **Orient:** skim `progress.md` (where we've been), `docs/PRODUCT.md` + `docs/ARCHITECTURE.md`
->    (what/why + how), and `feature-list.json` (what's next).
+>    (what/why + how), `feature-list.json` (what's next, by tier), and `BUILD-CHECKLIST.md`
+>    (the phased build order and each phase's "Done when" gate).
 > 3. **Work** the next `failing` feature (see §5), or resume the in-flight one from the handoff.
 > 4. **Hand off:** run the _Leave clean_ gate in `clean-state-checklist.md`, then **overwrite**
 >    `session-handoff.md` with the current snapshot, prepend a dated entry to `progress.md`, and
@@ -101,6 +102,7 @@ progress.md        # rolling log: durable, append-only history (append at sessio
 session-handoff.md # warm baton-pass: overwritten each session, read first to resume
 clean-state-checklist.md # start-clean / leave-clean gates run at both ends of a session
 feature-list.json  # the prioritized, tier-ordered source of truth (work top-down)
+BUILD-CHECKLIST.md # phased day-by-day build sequence — the concrete order to work the tiers in
 sprint-contract.md # per-feature "done" agreed BEFORE coding (prevents scope drift)
 evaluator-rubric.md # adversarial scorecard applied AFTER coding (separate eval pass)
 ```
@@ -143,6 +145,11 @@ verbose.**
 - **Work top-down through `feature-list.json` by tier. Do not start a Tier 1 item until every
   Tier 0 item is `passing`.** Prioritization is graded — an incomplete build that _feels
   finished_ beats a complete build with sloppy infra.
+- Follow `BUILD-CHECKLIST.md` for the concrete phase order within that tier structure — it breaks
+  each tier into phases with a specific "Done when" gate. Check off its boxes as features flip to
+  `passing`, and add a phase/bullet there whenever a feature is added or reordered in
+  `feature-list.json` (e.g. `admin.shell_route` landed in Phase 4 ahead of `admin.view_all`) —
+  the two files must stay in sync.
 - One feature at a time: pick the next `failing` feature → implement the thinnest vertical
   slice → make its acceptance tests pass → flip it to `passing` → commit.
 - **Contract before code, evaluate after:** at sprint start fill `sprint-contract.md` (the

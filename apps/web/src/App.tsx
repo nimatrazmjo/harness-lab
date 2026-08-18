@@ -1,4 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { AdminRoute } from "./features/admin/AdminRoute";
+import { AdminShell } from "./features/admin/AdminShell";
 import { LoginPage } from "./features/auth/LoginPage";
 import { EncounterListPage } from "./features/encounter/EncounterListPage";
 import { EncounterWorkspacePage } from "./features/encounter/EncounterWorkspacePage";
@@ -28,6 +30,14 @@ export function App() {
           <ProtectedRoute>
             <EncounterWorkspacePage />
           </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <AdminRoute>
+            <AdminShell />
+          </AdminRoute>
         }
       />
       <Route path="*" element={<Navigate to="/encounters" replace />} />

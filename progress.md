@@ -14,13 +14,21 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 
 ## Current state
 
-- **Active phase:** Tier 1 complete (16/16). **Tier 2 (pioneer) is now complete, 4/4** — all four
-  pioneer features code-complete, verified, and independently evaluated: `pioneer.version_diff`
-  (PASS), `pioneer.red_flags` (CONDITIONAL → both required fixes closed same session),
-  `pioneer.writing_style` (CONDITIONAL → no required fixes, both non-blocking recommendations
-  closed same session), `pioneer.bulk_pdf` (CONDITIONAL → both required fixes + all three
-  non-blocking recommendations closed same session).
-- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 16 / 16 passing   ·   **Tier 2:** 4 / 4 passing — complete
+- **Active phase:** Tier 1 complete (17/17, `admin.shell_route` added and closed this session).
+  **Tier 2 (pioneer) is complete, 4/4** — all four pioneer features code-complete, verified, and
+  independently evaluated: `pioneer.version_diff` (PASS), `pioneer.red_flags` (CONDITIONAL → both
+  required fixes closed same session), `pioneer.writing_style` (CONDITIONAL → no required fixes,
+  both non-blocking recommendations closed same session), `pioneer.bulk_pdf` (CONDITIONAL → both
+  required fixes + all three non-blocking recommendations closed same session).
+- **Tier 0:** 15 / 17 passing (2 `blocked` — real AWS provisioning, see below)   ·   **Tier 1:** 17 / 17 passing   ·   **Tier 2:** 4 / 4 passing — complete
+- **Docs-vs-code drift found and fixed this session (2026-08-17):** at session start,
+  `feature-list.json`/`AGENTS.md` in the working tree had reverted to a stale pre-Tier-1/2-complete
+  draft (all Tier 1/2 statuses back to `failing`, the TENANT-ISOLATION clarification dropped) while
+  a new `admin.shell_route` feature and `BUILD-CHECKLIST.md` had been added on top of that stale
+  base. Reconciled both docs back against `git show HEAD:feature-list.json`/`AGENTS.md` (the true,
+  already-complete state) before doing any feature work, so no completed work was redone. Only
+  `admin.shell_route` was a genuine gap — confirmed by checking the actual code
+  (`apps/web/src` had no admin directory).
 - **Harness:** `clean-state-checklist.md` (Start/Leave-clean gates), `sprint-contract.md`
   (done-conditions agreed before coding), `evaluator-rubric.md` (adversarial score after coding,
   ideally by a fresh subagent) are part of the session protocol — see AGENTS.md §1/§5/§11.
@@ -43,6 +51,35 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
 ---
 
 ## Log
+
+### 2026-08-17 — admin.shell_route (PASS) — new Tier 1 feature, docs-vs-code drift reconciled first
+- Session started with `feature-list.json`/`AGENTS.md` in the working tree reverted to a stale
+  pre-Tier-1/2-complete draft (git status showed both modified, uncommitted). Diffed the working
+  tree against `git show HEAD:...` for both files before touching any code: all Tier 1/2 feature
+  statuses had reverted to `failing`, and AGENTS.md's TENANT-ISOLATION clarification (added
+  2026-08-17, same day, earlier session) had been dropped. A new `admin.shell_route` feature entry
+  and a new `BUILD-CHECKLIST.md` had been added on top of that stale base. Restored every status
+  that HEAD already had as `passing` (18 features) and restored the TENANT-ISOLATION clarification
+  paragraph verbatim, while keeping `admin.shell_route` and `BUILD-CHECKLIST.md` — confirmed via
+  the actual codebase (`apps/web/src` had no `admin` directory at all) that `admin.shell_route`
+  was the one genuinely unbuilt item, not a false positive from the stale diff.
+- Built `admin.shell_route`: `AdminRoute` (role gate, mirrors `App.tsx`'s existing `ProtectedRoute`
+  pattern — redirects unauthenticated → `/login`, non-admin → `/encounters`) and `AdminShell` (nav
+  + layout, distinct dark-header treatment) in `apps/web/src/features/admin/`, wired as `/admin` in
+  `App.tsx`. Backend `AdminController` already enforced the admin role via
+  `RolesGuard`/`@Roles("admin")` — no backend code change needed, only a dedicated
+  `apps/api/test/admin-guard.e2e-spec.ts` naming that behavior explicitly (the feature's listed
+  test path; prior coverage was folded inside `admin-encounters`/`admin-roster` specs).
+- Independent evaluator (fresh subagent, no inherited context): **PASS**, zero required fixes.
+  Live-verified against a real running server with real seeded accounts (unauthenticated
+  `/admin/ping` → 401, provider → 403, admin → 200), confirmed `admin.controller.ts` was untouched
+  this sprint via `git log`, ran the full `pnpm verify` + 29-suite/99-test API e2e sweep, grepped
+  new files for secrets. Two non-blocking recommendations, both closed same session: (1) the admin
+  header looked too similar to the provider workspace header at a glance — added a distinct dark
+  treatment (`.admin-shell__header`); (2) checked off `sprint-contract.md`'s Done-condition boxes
+  with the evaluator's evidence instead of leaving them unchecked.
+- API e2e suite: 96 → 99 tests (3 new in `admin-guard.e2e-spec.ts`). Web unit tests: 30 → 33 (3 new
+  in `shell.test.tsx`). `pnpm verify` green.
 
 ### 2026-08-17 — pioneer.bulk_pdf (CONDITIONAL → closed) — fourth and final Tier 2 feature, Tier 2 now COMPLETE
 - Concrete approach decided in `sprint-contract.md` before coding: `pdfkit` (MIT, pure JS, no

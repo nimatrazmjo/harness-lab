@@ -17,145 +17,93 @@ goalposts or drift into adjacent work — the two most common ways an agent fake
 
 ## Active sprint
 
-**Feature(s):** `pioneer.bulk_pdf` (Tier 2 — fourth and final pioneer feature)
-**Goal (one sentence):** A provider (or admin) can export a patient's full encounter history —
-every saved note across every visit that provider is entitled to see — as one structured,
-readable PDF, respecting tenant isolation and logged to the audit trail like every other data
-export in this system.
+**Feature(s):** `admin.shell_route` (Tier 1)
+**Goal (one sentence):** A dedicated `/admin` route exists in the web app, reachable only by the
+admin role (frontend route gate + backend guard), rendering a distinct admin nav/layout shell that
+the existing admin capabilities (view-all, roster, templates — all already backend-complete) are
+the intended attachment point for.
 
-**Tier:** 2 · **Branch:** `feat/bulk-pdf`
+**Tier:** 1 · **Branch:** `feature/admin-shell-route`
+
+### Context (why this is the only real gap)
+
+Every other Tier 0/1/2 feature in `feature-list.json` is already `passing` — confirmed by
+comparing the committed history (`git log`, `session-handoff.md`, `progress.md`) against a stale
+working-tree copy of `feature-list.json`/`AGENTS.md` that had reverted statuses to `failing` and
+dropped the TENANT-ISOLATION clarification. Both docs have been reconciled back to the true state
+in this same session, before this sprint started. `admin.shell_route` is the one item that was
+newly added on top of that stale draft and is genuinely not built yet: `apps/web/src` has no
+`admin` directory, no `/admin` route in `App.tsx`, and `session-handoff.md` explicitly records "No
+admin frontend UI (backend-only, by design — no acceptance test requires it)" — true until now,
+false as of this sprint since `admin.shell_route`'s acceptance criteria explicitly require it.
 
 ### The concrete approach (decided up front)
 
-- **Library:** `pdfkit` (MIT, pure JS, no native bindings, no headless-browser dependency —
-  checked `npm view pdfkit version license` before adding: 0.19.x, MIT). Chosen over
-  `@react-pdf/renderer` (React-coupled, this is a plain Nest backend) and over a
-  Puppeteer/headless-Chrome HTML-to-PDF approach (heavy binary dependency, slow, overkill for
-  structured text). A from-scratch PDF writer is not attempted — PDF is a real binary format with
-  cross-reference tables; hand-rolling it would be irresponsible, unlike the diff/red-flags
-  sprints where a small deterministic algorithm was reasonable to write by hand.
-- **Tenant-isolation scope decision** (mirrors the existing `EncountersService.getForUser`
-  `allowAdmin` pattern, not a new policy): a non-admin provider's export includes **only
-  encounters where `provider_id` = their own id** for that patient — never another provider's
-  encounter records, even for the same patient. This is direct list/read access to encounter
-  records, the exact case AGENTS.md §2 TENANT-ISOLATION forbids ("no direct GET/PATCH/list access
-  to it, ever"). It is NOT the same as the CONTEXT-INJECTION clarification (which only permits an
-  indirect, backend-tool-mediated read of a patient's assessment/plan *during generation* — not a
-  direct export of another provider's full note content). An admin's export includes every
-  encounter for that patient, via the same explicit admin-guard pattern used everywhere else
-  (`admin.encounters`, `admin.audit_logs`). If a patient exists but the requesting provider has
-  zero encounters of their own with them, respond 403 (consistent with `getForUser`'s existing
-  403-for-exists-but-forbidden convention, not a 404 — this codebase already accepts that
-  existence-leak trade-off elsewhere, so staying consistent beats introducing a new posture here).
-- **Route:** `GET /patients/:patientId/export` on a new `PatientsController` (no controller exists
-  yet — `PatientsRepository` is currently internal-only, used via `findOrCreate` during encounter
-  creation). Returns `Content-Type: application/pdf`, `Content-Disposition: attachment`.
-- **Selection logic is a pure, unit-testable function** — `selectEncountersForExport(encounters,
-  requestingUser): EncounterRow[]` in `apps/api/src/patients/` — separate from PDF rendering, so
-  tenant-isolation correctness can be asserted directly with plain `expect()` calls, not by
-  parsing PDF bytes.
-- **Rendering:** `apps/api/src/patients/pdf-export.service.ts` builds the document with
-  `new PDFDocument({ compress: false })` — compression disabled deliberately so the e2e test can
-  assert identifying text appears in the raw output buffer without adding a second new dependency
-  (a PDF-parsing library) just for tests. Per patient: name/DOB header, then per encounter
-  (chronological): date, authoring provider name, status, and the **latest saved note version**
-  (Subjective/Objective/Assessment/Plan/ICD-10 codes) via the existing
-  `NotesRepository.getLatestPerEncounter`. An encounter with no saved note version yet (status
-  `draft`/`generated`) is listed with an explicit "no saved note" line — never fabricated content
-  (AGENTS.md [CLINICAL-SAFETY]).
-- **Audit logging:** one `AuditService.log()` call per export — `action:
-  "patient.bulk_pdf_export"`, `targetType: "patient"`, `targetId: patientId`, `metadata: {
-  encounterCount }` — no PHI/transcript content in metadata, matching the existing rule enforced
-  on every other audit call in this codebase.
+- **Backend:** `AdminController` already enforces `@UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles("admin")` on the whole `/admin/*` surface (`apps/api/src/admin/admin.controller.ts`) —
+  this already satisfies "enforced by the API guard." No backend code change needed; only a
+  dedicated test file naming this behavior explicitly, since the feature names
+  `apps/api/test/admin-guard.e2e-spec.ts` as its own test path (existing coverage is folded inside
+  `admin-encounters.e2e-spec.ts`/`admin-roster.e2e-spec.ts`, not a standalone file).
+- **Frontend:** new `apps/web/src/features/admin/AdminShell.tsx` — a nav/layout component distinct
+  from the provider workspace (own header/nav, e.g. links for Encounters / Roster / Templates /
+  Audit Log as a placeholder nav — the pages behind those links are NOT in scope, see below).
+  A new `AdminRoute` guard component (mirrors the existing `ProtectedRoute` pattern in `App.tsx`)
+  checks `user.role === "admin"`; a non-admin (including an unauthenticated user) hitting `/admin`
+  is redirected (`Navigate to="/encounters"` for a logged-in non-admin, `/login` if unauthenticated)
+  — never a raw crash or blank page.
+  `/admin` route added to `App.tsx`, rendering `<AdminRoute><AdminShell /></AdminRoute>`.
+- **No new backend routes, no new DB schema.** `AuthUser.role` (`libs/shared-types/src/auth.ts`)
+  already carries the role needed for the frontend gate.
 
 ### Explicitly OUT of scope (do not touch this sprint)
 
-- Any change to note generation, versioning, or the scribe pipeline — this is a read-only export
-  of already-saved data.
-- A frontend "Export PDF" button/UI — acceptance names a backend test path only
-  (`bulk-pdf.e2e-spec.ts`); no frontend-observable behavior is required the way the red-flags
-  banner or draft-restore-on-reload were.
-- Exporting draft/unsaved note content (drafts are provider-private in-progress state, not part
-  of the saved record — only saved `note_versions` belong in a durable export).
-- The tracked cross-cycle autosave race and the writing-style window-stickiness question from
-  prior sprints — separate, pre-existing, not this sprint's scope.
+- Building the actual admin view-all/roster/templates-CRUD *pages* — those features are already
+  `passing` per their own (backend-only) acceptance criteria and test paths. `AdminShell` is only
+  the attachment shell; wiring real pages into it is separate, unrequested scope creep.
+- Any change to `AdminController`'s existing guard logic — it already works; this sprint only adds
+  a dedicated test file naming it, per the feature's listed test path.
+- The tracked cross-cycle autosave race and writing-style window-stickiness question from prior
+  sessions — unrelated, pre-existing, not this sprint's scope.
 
-### Done conditions (testable — from feature-list.json acceptance, expanded)
+### Done conditions (testable — from feature-list.json acceptance)
 
-- [x] A provider can export a PDF for a patient they've seen, containing every one of their own
-      saved encounters for that patient — test: `bulk-pdf.e2e-spec.ts`
-- [x] The export is limited to the requesting provider's own encounters for that patient — another
-      provider's encounter for the same patient never appears — test: `bulk-pdf.e2e-spec.ts` +
-      `selectEncountersForExport` unit test
-- [x] An admin's export for the same patient includes encounters from every provider — test:
-      `bulk-pdf.e2e-spec.ts`
-- [x] A provider with no encounters of their own for an existing patient gets 403, not a partial
-      or empty PDF that silently hides other providers' data — test: `bulk-pdf.e2e-spec.ts`
-- [x] The response is a real, non-trivial PDF (`Content-Type: application/pdf`, starts with the
-      `%PDF-` magic bytes, non-trivial byte length) — test: `bulk-pdf.e2e-spec.ts`. Independently
-      confirmed with `file` and a real PDF-text extraction during manual verification, not just
-      the header assertion.
-- [x] Every export writes exactly one `audit_logs` row with no transcript/PHI content in
-      `metadata` — test: `bulk-pdf.e2e-spec.ts`
-- [x] An encounter with no saved note version is listed without fabricating content — test:
-      `bulk-pdf.e2e-spec.ts`
+- [x] An `/admin` route exists and renders a distinct admin shell (nav/layout), separate from the
+      provider workspace — test: `apps/web/src/features/admin/__tests__/shell.test.tsx`. Header
+      given a visually distinct dark treatment (`.admin-shell__header`) after evaluator review, so
+      admin vs. provider is recognizable at a glance, not just by the `<h1>` text.
+- [x] Only the admin role can reach it — a provider hitting `/admin` is redirected/blocked,
+      enforced by both the frontend route gate (test: `shell.test.tsx`) and the API guard (test:
+      `apps/api/test/admin-guard.e2e-spec.ts`). Live-verified by the evaluator: unauthenticated
+      `/admin/ping` → 401, provider token → 403, admin token → 200, against a real running server
+      and real seeded accounts.
+- [x] The shell is the single attachment point for the rest of the admin features (structural —
+      verified by the shell rendering a nav that would host those pages, not by building the pages)
 
 ### Invariants that must still hold (AGENTS.md §2)
 
-- [x] TENANT-ISOLATION — direct list/read access to encounter records stays scoped to the
-      requesting provider's own `provider_id`, admin bypass only via explicit role check
-- [x] CLINICAL-SAFETY — never fabricates note content for an encounter that has none
-- [x] SECRETS — audit metadata carries only structural facts (patient id, encounter count), never
-      transcript/note content
-- [x] PERSISTENCE — no new durable state beyond one audit_logs row; the PDF itself is generated
-      on-demand, not stored
+- [x] TENANT-ISOLATION / admin-guard — no new bypass of the existing role check. Evaluator
+      confirmed `admin.controller.ts` was untouched this sprint (predates this branch in git log).
+- [x] No secret or token newly logged or exposed — evaluator grepped new files, found none.
 
 ### Verification plan (how each condition is proven)
 
-- `apps/api/src/patients/select-encounters-for-export.spec.ts` — pure unit tests on the
-  selection function: own-provider-only filtering, admin-sees-all, empty-result shape (co-located
-  `.spec.ts`, matching this app's existing unit-test convention — not a `__tests__/*.test.ts`
-  vitest-style path, that's the `libs/*` convention)
-- `apps/api/test/bulk-pdf.e2e-spec.ts` — real HTTP round trip against real Postgres: two providers
-  with overlapping/non-overlapping encounters for the same patient, an admin export, the 403 case,
-  a magic-bytes + content-length check, an audit-log-row assertion, a no-saved-note-yet encounter,
-  a non-Latin-1 patient name (added after the evaluator found this broke the export), and a
-  no-audit-row-on-403 check
-- `pnpm run verify` green; `pnpm --filter api run test:e2e` all green
-- Manual curl walkthrough: requested the export endpoint for a real seeded provider/patient,
-  confirmed a valid, `file`-recognized, openable PDF with correctly formatted content (this is how
-  a real `patient.dob` Date-vs-string rendering bug was caught before the evaluator ever ran)
+- `apps/web/src/features/admin/__tests__/shell.test.tsx` — renders `AdminShell` for an admin user
+  (visible nav), and asserts `AdminRoute` redirects a non-admin/unauthenticated user away from
+  `/admin` (React Testing Library + `MemoryRouter`, matching this app's existing test conventions)
+- `apps/api/test/admin-guard.e2e-spec.ts` — a non-admin (or unauthenticated) request to
+  `/admin/ping` gets 403/401; an admin request gets 200
+- `pnpm run verify` green (lint + typecheck + test + build, both apps)
+- Manual check: log in as a seeded provider and as the seeded admin, confirm `/admin` behaves
+  correctly for both in a real browser session
 
 ### Definition of done
 
-- [x] Every _Done condition_ checked with evidence — independent evaluator ran the app live on a
-      scratch port, created real providers/patients/encounters via the HTTP API, downloaded and
-      independently parsed real PDFs with a fresh `pypdf` install (not trusting this sprint's own
-      `extractText()` test helper), and checked the audit table directly via `docker exec
-      scribe-postgres psql`
-- [x] `pnpm verify` green (96/96 API e2e, matching this session's final count); _Leave clean_ gate
-      passed
-- [x] `evaluator-rubric.md` scored — **Overall: CONDITIONAL**, two required fixes. (1) A patient
-      name outside the Latin-1 range (e.g. CJK) crashed the export with `ERR_INVALID_CHAR` because
-      the `Content-Disposition` filename was built from the raw patient name — **fixed** by
-      sanitizing the filename to a safe ASCII subset (`patients.controller.ts`'s
-      `safeFilenameSegment`); the PDF's own text content is untouched and still shows the real
-      name. Added a regression test with a CJK name. (2) The evaluator found the crash from fix
-      (1) meant an audit row could be written even though the client got a 500 — flagged as an
-      ordering concern. **Investigated a literal reordering fix** (audit only after `res.send()`
-      completes) but discovered and reproduced live that this introduces a genuine, unfixable race
-      — `res.send()` returning control to the handler is not the same event as the client
-      confirming receipt, so "audit after delivery" isn't an achievable HTTP semantic without
-      added application-level acknowledgment (out of scope). **Resolved instead by fixing the
-      actual root cause** (the filename crash, fix 1) and keeping audit logging where every other
-      audit call in this codebase already puts it — immediately after the underlying action
-      provably succeeds (here, `pdfExport.render()` returning real bytes), documented explicitly
-      in `patients.service.ts` so this isn't silently rediscovered as a "bug" later.
-      Non-blocking recommendations also closed same session: added `doc.on("error", reject)` in
-      `pdf-export.service.ts` (defensive guard against an unhandled pdfkit stream error), and
-      batched the per-encounter `providersRepo.findById` N+1 into one `findByIds` call.
-- [x] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated. Tier 2 is now
-      4/4 — all pioneer features complete.
-- [ ] `pnpm verify` green; _Leave clean_ gate passed
-- [ ] `evaluator-rubric.md` scored by a separate subagent
-- [ ] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated
+- [x] Every _Done condition_ checked with evidence
+- [x] `pnpm verify` green (29 e2e suites / 99 tests, up from 96); _Leave clean_ gate passed
+- [x] `evaluator-rubric.md` scored by a separate subagent — **PASS**, zero required fixes. Two
+      non-blocking recommendations, both closed same session: (1) visually distinguish the admin
+      header (dark treatment added), (2) check off this contract's boxes with evidence (this
+      edit). Third note (confirm `BUILD-CHECKLIST.md` intentional) — yes, it's the new phased
+      build plan this session reconciled `feature-list.json`/`AGENTS.md` against; not accidental.
+- [x] `feature-list.json` → `passing`; `progress.md` + `session-handoff.md` updated
