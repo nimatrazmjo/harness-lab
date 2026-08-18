@@ -30,7 +30,7 @@
             "id": "devops.dockerfile_api",
             "tier": 0,
             "title": "Production Dockerfile for apps/api",
-            "status": "failing",
+            "status": "passing",
             "description": "Multi-stage Dockerfile for the NestJS API: build stage compiles TS, final stage is a slim runtime image, non-root user, base image pinned by digest (not a floating tag).",
             "acceptance": [
                 "Multi-stage build — final image contains no dev dependencies, no TS source, no build tooling.",
