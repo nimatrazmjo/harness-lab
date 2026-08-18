@@ -1,0 +1,297 @@
+# Manual AWS Steps — DevOps Workstream
+
+Steps only a human with AWS admin access can perform (IAM permission grants). Agents in this
+workstream deliberately can't self-authorize these — see `devops/AGENTS.md`'s non-negotiables
+(never use the account root user; `devops-agent` is scoped so it can't grant itself more
+permissions). Run each block below with an **admin** AWS profile, not `devops-agent` and not
+root.
+
+---
+
+## Why this file exists
+
+`devops-agent` (the scoped IAM user used for all `/devops` Terraform/AWS work) started with no
+permissions. `devops.terraform_backend` needs it to create an S3 bucket + DynamoDB table;
+`devops.terraform_oidc_github` needs it to create a GitHub Actions OIDC provider + IAM role.
+An initial attempt to grant these via a single **inline** user policy silently failed — inline
+user policies are capped at 2,048 characters (aggregate), and the combined policy was ~8,500
+characters. Fix: two separate **managed** policies (6,144-char limit each), attached to
+`devops-agent`.
+
+---
+
+## Step 1 — Save the two policy documents
+
+`scribe-devops-bootstrap-policy.json` (needed now — state backend + OIDC/role management):
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {"Sid": "StsIdentity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*"},
+        {"Sid": "TerraformStateBucketBootstrap", "Effect": "Allow", "Action": ["s3:CreateBucket","s3:PutBucketVersioning","s3:PutEncryptionConfiguration","s3:PutBucketPublicAccessBlock","s3:GetBucketVersioning","s3:GetEncryptionConfiguration","s3:GetBucketPublicAccessBlock","s3:PutBucketTagging","s3:GetBucketTagging","s3:ListBucket"], "Resource": "arn:aws:s3:::scribe-terraform-state-404063516240"},
+        {"Sid": "TerraformStateObjectAccess", "Effect": "Allow", "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject"], "Resource": "arn:aws:s3:::scribe-terraform-state-404063516240/scribe/*"},
+        {"Sid": "TerraformLockTableBootstrap", "Effect": "Allow", "Action": ["dynamodb:CreateTable","dynamodb:DescribeTable","dynamodb:TagResource","dynamodb:GetItem","dynamodb:PutItem","dynamodb:DeleteItem"], "Resource": "arn:aws:dynamodb:us-east-1:404063516240:table/scribe-terraform-locks"},
+        {"Sid": "OidcProviderManage", "Effect": "Allow", "Action": ["iam:CreateOpenIDConnectProvider","iam:GetOpenIDConnectProvider","iam:DeleteOpenIDConnectProvider","iam:TagOpenIDConnectProvider","iam:ListOpenIDConnectProviders","iam:UpdateOpenIDConnectProviderThumbprint"], "Resource": "arn:aws:iam::404063516240:oidc-provider/token.actions.githubusercontent.com"},
+        {"Sid": "GithubActionsRoleManage", "Effect": "Allow", "Action": ["iam:CreateRole","iam:GetRole","iam:DeleteRole","iam:UpdateRole","iam:UpdateAssumeRolePolicy","iam:TagRole","iam:UntagRole","iam:PutRolePolicy","iam:GetRolePolicy","iam:DeleteRolePolicy","iam:ListRolePolicies","iam:ListAttachedRolePolicies","iam:ListInstanceProfilesForRole","iam:AttachRolePolicy","iam:DetachRolePolicy","iam:PassRole"], "Resource": ["arn:aws:iam::404063516240:role/scribe-github-actions-deploy","arn:aws:iam::404063516240:role/scribe-*"]}
+    ]
+}
+```
+
+`scribe-devops-infra-policy.json` (for later features — RDS/EC2/ECR/SSM):
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {"Sid": "NetworkingCompute", "Effect": "Allow", "Action": ["ec2:Describe*","ec2:CreateVpc","ec2:DeleteVpc","ec2:ModifyVpcAttribute","ec2:CreateSubnet","ec2:DeleteSubnet","ec2:CreateSecurityGroup","ec2:DeleteSecurityGroup","ec2:AuthorizeSecurityGroupIngress","ec2:AuthorizeSecurityGroupEgress","ec2:RevokeSecurityGroupIngress","ec2:RevokeSecurityGroupEgress","ec2:CreateRouteTable","ec2:DeleteRouteTable","ec2:CreateRoute","ec2:DeleteRoute","ec2:AssociateRouteTable","ec2:DisassociateRouteTable","ec2:CreateInternetGateway","ec2:DeleteInternetGateway","ec2:AttachInternetGateway","ec2:DetachInternetGateway","ec2:RunInstances","ec2:TerminateInstances","ec2:ModifyInstanceAttribute","ec2:CreateTags","ec2:DeleteTags"], "Resource": "*"},
+        {"Sid": "RdsDatabase", "Effect": "Allow", "Action": ["rds:CreateDBInstance","rds:DeleteDBInstance","rds:ModifyDBInstance","rds:DescribeDBInstances","rds:CreateDBSubnetGroup","rds:DeleteDBSubnetGroup","rds:DescribeDBSubnetGroups","rds:AddTagsToResource","rds:ListTagsForResource"], "Resource": "*"},
+        {"Sid": "EcrRepos", "Effect": "Allow", "Action": ["ecr:CreateRepository","ecr:DeleteRepository","ecr:DescribeRepositories","ecr:PutImageTagMutability","ecr:PutLifecyclePolicy","ecr:PutImageScanningConfiguration","ecr:BatchCheckLayerAvailability","ecr:PutImage","ecr:InitiateLayerUpload","ecr:UploadLayerPart","ecr:CompleteLayerUpload","ecr:BatchGetImage","ecr:DescribeImages","ecr:ListImages"], "Resource": "arn:aws:ecr:*:*:repository/scribe-*"},
+        {"Sid": "EcrAuth", "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*"},
+        {"Sid": "SsmDeploy", "Effect": "Allow", "Action": ["ssm:SendCommand","ssm:GetCommandInvocation","ssm:ListCommandInvocations","ssm:DescribeInstanceInformation"], "Resource": "*", "Condition": {"StringEquals": {"ssm:resourceTag/deploy": "true"}}},
+        {"Sid": "IamInstanceProfileMgmt", "Effect": "Allow", "Action": ["iam:CreateInstanceProfile","iam:DeleteInstanceProfile","iam:AddRoleToInstanceProfile","iam:RemoveRoleFromInstanceProfile","iam:GetInstanceProfile"], "Resource": "arn:aws:iam::404063516240:instance-profile/scribe-*"}
+    ]
+}
+```
+
+## Step 2 — Create both as managed policies
+
+Use an **admin** profile (not `devops-agent`, not root):
+
+```bash
+aws iam create-policy \
+  --policy-name scribe-devops-bootstrap \
+  --policy-document file://scribe-devops-bootstrap-policy.json \
+  --profile <your-admin-profile>
+
+aws iam create-policy \
+  --policy-name scribe-devops-infra \
+  --policy-document file://scribe-devops-infra-policy.json \
+  --profile <your-admin-profile>
+```
+
+## Step 3 — Attach both to `devops-agent`
+
+```bash
+aws iam attach-user-policy \
+  --user-name devops-agent \
+  --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-bootstrap \
+  --profile <your-admin-profile>
+
+aws iam attach-user-policy \
+  --user-name devops-agent \
+  --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-infra \
+  --profile <your-admin-profile>
+```
+
+## Step 4 — Clean up any failed inline-policy attempt
+
+Harmless if nothing was actually saved (that's the leading theory for why the first attempt
+had no effect) — check first, then delete only if something's actually there:
+
+```bash
+aws iam list-user-policies --user-name devops-agent --profile <your-admin-profile>
+# if it lists a policy name, delete it:
+aws iam delete-user-policy --user-name devops-agent --policy-name <name-from-above> --profile <your-admin-profile>
+```
+
+## Step 5 — Verify
+
+```bash
+aws iam list-attached-user-policies --user-name devops-agent --profile <your-admin-profile>
+```
+
+Should list both `scribe-devops-bootstrap` and `scribe-devops-infra`. Once confirmed, tell the
+agent (or re-invoke `/devops`) to re-run `terraform apply` for `devops.terraform_backend` before
+anything downstream is dispatched.
+
+---
+
+## Step 6 — Round 2: broader read permissions (needed after Steps 1-5)
+
+The two managed policies from Step 1 let `terraform apply` actually `CreateBucket`/
+`CreateTable` — confirmed working, both resources now exist in AWS. But the AWS provider does a
+post-create **read-back** to populate Terraform state, and that needs several read-only actions
+not in the original grant (`s3:GetBucketPolicy`, `dynamodb:DescribeContinuousBackups`, and
+likely more — the `aws_s3_bucket` resource in provider v5 reads many bucket-level sub-configs:
+ACL, CORS, logging, lifecycle, notification, replication, request payment, website, object-lock,
+accelerate config, etc). Patching these one denied action at a time is impractical, so grant
+broad **read-only, resource-scoped** access instead: `s3:Get*` restricted to just this one
+bucket's ARN (does not grant `s3:GetObject`, which needs an object ARN — `s3:Get*` on a bucket
+ARN only matches bucket-level actions), and `dynamodb:Describe*` restricted to just this one
+table's ARN.
+
+**Update the `scribe-devops-bootstrap` managed policy** (new version, since IAM managed policies
+are versioned — keep it as the same policy, just add a new default version):
+
+```bash
+cat > scribe-devops-bootstrap-policy-v2.json <<'EOF'
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {"Sid": "StsIdentity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*"},
+        {"Sid": "TerraformStateBucketBootstrap", "Effect": "Allow", "Action": ["s3:CreateBucket","s3:Get*","s3:PutBucketVersioning","s3:PutEncryptionConfiguration","s3:PutBucketPublicAccessBlock","s3:PutBucketTagging","s3:ListBucket"], "Resource": "arn:aws:s3:::scribe-terraform-state-404063516240"},
+        {"Sid": "TerraformStateObjectAccess", "Effect": "Allow", "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject"], "Resource": "arn:aws:s3:::scribe-terraform-state-404063516240/scribe/*"},
+        {"Sid": "TerraformLockTableBootstrap", "Effect": "Allow", "Action": ["dynamodb:CreateTable","dynamodb:Describe*","dynamodb:TagResource","dynamodb:GetItem","dynamodb:PutItem","dynamodb:DeleteItem"], "Resource": "arn:aws:dynamodb:us-east-1:404063516240:table/scribe-terraform-locks"},
+        {"Sid": "OidcProviderManage", "Effect": "Allow", "Action": ["iam:CreateOpenIDConnectProvider","iam:GetOpenIDConnectProvider","iam:DeleteOpenIDConnectProvider","iam:TagOpenIDConnectProvider","iam:ListOpenIDConnectProviders","iam:UpdateOpenIDConnectProviderThumbprint"], "Resource": "arn:aws:iam::404063516240:oidc-provider/token.actions.githubusercontent.com"},
+        {"Sid": "GithubActionsRoleManage", "Effect": "Allow", "Action": ["iam:CreateRole","iam:GetRole","iam:DeleteRole","iam:UpdateRole","iam:UpdateAssumeRolePolicy","iam:TagRole","iam:UntagRole","iam:PutRolePolicy","iam:GetRolePolicy","iam:DeleteRolePolicy","iam:ListRolePolicies","iam:ListAttachedRolePolicies","iam:ListInstanceProfilesForRole","iam:AttachRolePolicy","iam:DetachRolePolicy","iam:PassRole"], "Resource": ["arn:aws:iam::404063516240:role/scribe-github-actions-deploy","arn:aws:iam::404063516240:role/scribe-*"]}
+    ]
+}
+EOF
+
+aws iam create-policy-version \
+  --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-bootstrap \
+  --policy-document file://scribe-devops-bootstrap-policy-v2.json \
+  --set-as-default \
+  --profile <your-admin-profile>
+```
+
+IAM keeps at most 5 versions per managed policy. If `create-policy-version` errors with
+`LimitExceeded`, delete the oldest non-default version first:
+
+```bash
+aws iam list-policy-versions --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-bootstrap --profile <your-admin-profile>
+aws iam delete-policy-version --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-bootstrap --version-id <oldest-non-default-version-id> --profile <your-admin-profile>
+```
+
+### Step 6a — literal copy-paste walkthrough for Step 6
+
+Same as Step 6 above, spelled out as discrete commands to paste directly into a terminal
+(or via Claude Code's `!` prefix to run from within a session).
+
+**1. Check what admin AWS access you actually have:**
+
+```bash
+aws sts get-caller-identity --profile default
+```
+
+If that's the account root user, it's fine to use `--profile default` for this one-off IAM
+grant — a human running root directly for a manual IAM change is different from an agent
+driving root through the `/devops` workflow (which stays hard-blocked, see `devops/init.sh`).
+If a separate admin IAM user/profile exists, use that instead everywhere below.
+
+**2. Create the updated policy file:**
+
+```bash
+cat > scribe-devops-bootstrap-policy-v2.json <<'EOF'
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {"Sid": "StsIdentity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*"},
+        {"Sid": "TerraformStateBucketBootstrap", "Effect": "Allow", "Action": ["s3:CreateBucket","s3:Get*","s3:PutBucketVersioning","s3:PutEncryptionConfiguration","s3:PutBucketPublicAccessBlock","s3:PutBucketTagging","s3:ListBucket"], "Resource": "arn:aws:s3:::scribe-terraform-state-404063516240"},
+        {"Sid": "TerraformStateObjectAccess", "Effect": "Allow", "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject"], "Resource": "arn:aws:s3:::scribe-terraform-state-404063516240/scribe/*"},
+        {"Sid": "TerraformLockTableBootstrap", "Effect": "Allow", "Action": ["dynamodb:CreateTable","dynamodb:Describe*","dynamodb:TagResource","dynamodb:GetItem","dynamodb:PutItem","dynamodb:DeleteItem"], "Resource": "arn:aws:dynamodb:us-east-1:404063516240:table/scribe-terraform-locks"},
+        {"Sid": "OidcProviderManage", "Effect": "Allow", "Action": ["iam:CreateOpenIDConnectProvider","iam:GetOpenIDConnectProvider","iam:DeleteOpenIDConnectProvider","iam:TagOpenIDConnectProvider","iam:ListOpenIDConnectProviders","iam:UpdateOpenIDConnectProviderThumbprint"], "Resource": "arn:aws:iam::404063516240:oidc-provider/token.actions.githubusercontent.com"},
+        {"Sid": "GithubActionsRoleManage", "Effect": "Allow", "Action": ["iam:CreateRole","iam:GetRole","iam:DeleteRole","iam:UpdateRole","iam:UpdateAssumeRolePolicy","iam:TagRole","iam:UntagRole","iam:PutRolePolicy","iam:GetRolePolicy","iam:DeleteRolePolicy","iam:ListRolePolicies","iam:ListAttachedRolePolicies","iam:ListInstanceProfilesForRole","iam:AttachRolePolicy","iam:DetachRolePolicy","iam:PassRole"], "Resource": ["arn:aws:iam::404063516240:role/scribe-github-actions-deploy","arn:aws:iam::404063516240:role/scribe-*"]}
+    ]
+}
+EOF
+```
+
+**3. Push it as the new default version of the existing policy:**
+
+```bash
+aws iam create-policy-version \
+  --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-bootstrap \
+  --policy-document file://scribe-devops-bootstrap-policy-v2.json \
+  --set-as-default \
+  --profile default
+```
+
+(swap `--profile default` for your real admin profile name if different, in every command
+here)
+
+**4. If that errors with `LimitExceeded`** (IAM keeps max 5 versions per policy):
+
+```bash
+aws iam list-policy-versions --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-bootstrap --profile default
+```
+
+Find the `VersionId` of the oldest one where `"IsDefaultVersion": false`, then:
+
+```bash
+aws iam delete-policy-version --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-bootstrap --version-id <that-version-id> --profile default
+```
+
+Then retry step 3.
+
+**5. Verify it took:**
+
+```bash
+aws iam get-policy-version \
+  --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-bootstrap \
+  --version-id $(aws iam get-policy --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-bootstrap --profile default --query 'Policy.DefaultVersionId' --output text --profile default) \
+  --profile default
+```
+
+(or check the AWS Console → IAM → Policies → `scribe-devops-bootstrap` → Permissions tab —
+easier to eyeball)
+
+Once done, tell the agent (or re-invoke `/devops`) to re-run `plan`/`apply` and verify the
+feature end-to-end.
+
+---
+
+## Step 7 — Round 3: one more DynamoDB action (`ListTagsOfResource`)
+
+After Step 6/6a, `terraform plan` no longer wants to taint/replace anything (good — the
+`s3:Get*` grant fixed the S3 side completely: plan shows a clean `3 to add, 0 to change, 0 to
+destroy` for the three remaining S3 sub-resources). But it still errors on
+`dynamodb:ListTagsOfResource` — a tag-read action that lives outside the `dynamodb:Describe*`
+wildcard namespace, so Step 6's grant didn't cover it.
+
+**Update the `TerraformLockTableBootstrap` statement** to add `dynamodb:ListTagsOfResource`
+(and `dynamodb:UntagResource` for completeness, so a future tag change doesn't trigger another
+round). Repeat Step 6a's process with this file instead:
+
+```bash
+cat > scribe-devops-bootstrap-policy-v3.json <<'EOF'
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {"Sid": "StsIdentity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*"},
+        {"Sid": "TerraformStateBucketBootstrap", "Effect": "Allow", "Action": ["s3:CreateBucket","s3:Get*","s3:PutBucketVersioning","s3:PutEncryptionConfiguration","s3:PutBucketPublicAccessBlock","s3:PutBucketTagging","s3:ListBucket"], "Resource": "arn:aws:s3:::scribe-terraform-state-404063516240"},
+        {"Sid": "TerraformStateObjectAccess", "Effect": "Allow", "Action": ["s3:GetObject","s3:PutObject","s3:DeleteObject"], "Resource": "arn:aws:s3:::scribe-terraform-state-404063516240/scribe/*"},
+        {"Sid": "TerraformLockTableBootstrap", "Effect": "Allow", "Action": ["dynamodb:CreateTable","dynamodb:Describe*","dynamodb:TagResource","dynamodb:UntagResource","dynamodb:ListTagsOfResource","dynamodb:GetItem","dynamodb:PutItem","dynamodb:DeleteItem"], "Resource": "arn:aws:dynamodb:us-east-1:404063516240:table/scribe-terraform-locks"},
+        {"Sid": "OidcProviderManage", "Effect": "Allow", "Action": ["iam:CreateOpenIDConnectProvider","iam:GetOpenIDConnectProvider","iam:DeleteOpenIDConnectProvider","iam:TagOpenIDConnectProvider","iam:ListOpenIDConnectProviders","iam:UpdateOpenIDConnectProviderThumbprint"], "Resource": "arn:aws:iam::404063516240:oidc-provider/token.actions.githubusercontent.com"},
+        {"Sid": "GithubActionsRoleManage", "Effect": "Allow", "Action": ["iam:CreateRole","iam:GetRole","iam:DeleteRole","iam:UpdateRole","iam:UpdateAssumeRolePolicy","iam:TagRole","iam:UntagRole","iam:PutRolePolicy","iam:GetRolePolicy","iam:DeleteRolePolicy","iam:ListRolePolicies","iam:ListAttachedRolePolicies","iam:ListInstanceProfilesForRole","iam:AttachRolePolicy","iam:DetachRolePolicy","iam:PassRole"], "Resource": ["arn:aws:iam::404063516240:role/scribe-github-actions-deploy","arn:aws:iam::404063516240:role/scribe-*"]}
+    ]
+}
+EOF
+
+aws iam create-policy-version \
+  --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-bootstrap \
+  --policy-document file://scribe-devops-bootstrap-policy-v3.json \
+  --set-as-default \
+  --profile default
+```
+
+If `LimitExceeded` (same as Step 6a's note 4), delete the oldest non-default version first,
+then retry.
+
+---
+
+## Log
+
+- **2026-08-18** — First grant attempt (inline user policy) had no effect: `terraform apply`
+  for `devops.terraform_backend` failed identically before and after, with
+  `AccessDenied ... because no identity-based policy allows the action` — the phrasing IAM uses
+  when no identity policy grants it, consistent with the inline policy (~8,500 chars) exceeding
+  the 2,048-char inline aggregate limit and never actually saving. Fixed by splitting into two
+  managed policies (Steps 1-5) — confirmed working, `CreateBucket`/`CreateTable` succeeded.
+- **2026-08-18** — After Steps 1-5, `terraform apply` created both real resources
+  (`scribe-terraform-state-404063516240` bucket, `scribe-terraform-locks` table — both
+  confirmed to exist via `aws s3api head-bucket` / `aws dynamodb describe-table`) but then
+  failed on the AWS provider's post-create read-back (`s3:GetBucketPolicy`,
+  `dynamodb:DescribeContinuousBackups` denied), which tainted both resources in Terraform state
+  (wants to destroy+recreate). `lifecycle.prevent_destroy` correctly blocked the replace — no
+  data loss, no actual destroy attempted. Ran `terraform untaint` on both to clear the false
+  taint (the actual AWS resources are fine). Step 6 above grants broader scoped read access to
+  avoid further one-action-at-a-time denials on the provider's remaining read calls
+  (versioning, encryption config, public-access-block resources still need to be created —
+  plan hadn't gotten that far before erroring).
+- **2026-08-18** — After Step 6/6a, `terraform plan` is clean on the S3 side: no more
+  taint/replace, just `3 to add, 0 to change, 0 to destroy` for the remaining sub-resources
+  (versioning, encryption config, public-access-block). One more DynamoDB gap surfaced:
+  `dynamodb:ListTagsOfResource` denied — outside the `dynamodb:Describe*` wildcard's namespace.
+  Step 7 adds it (plus `UntagResource` for completeness).

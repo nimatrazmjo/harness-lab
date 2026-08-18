@@ -5,42 +5,35 @@ protocol. Separate from the repo-root `session-handoff.md` on purpose._
 
 ## Where things stand
 
-Both Tier 0 Dockerfile items are `passing` and merged to `main`:
-- `devops.dockerfile_api` — `passing`. PR https://github.com/nimatrazmjo/harness-lab/pull/5,
-  merged.
-- `devops.dockerfile_web` — `passing`. PR https://github.com/nimatrazmjo/harness-lab/pull/6,
-  merged.
+All three Tier 0 items that don't need real AWS *networking/compute* are now `passing`:
+- `devops.dockerfile_api` — `passing`. Merged (PR #5).
+- `devops.dockerfile_web` — `passing`. Merged (PR #6).
+- `devops.terraform_backend` — **`passing`** (2026-08-18, this session). Real S3 bucket
+  (`scribe-terraform-state-404063516240`, versioning/SSE/public-access-block all confirmed
+  live) + real DynamoDB lock table (`scribe-terraform-locks`, `ACTIVE`) provisioned and fully
+  verified against real AWS — including an actual concurrent-apply lock test, not just
+  config inspection. `infra/terraform/` now has a real remote state object. Full story
+  (three rounds of IAM-permission discovery, each documented as it happened) in
+  `devops/progress.md`'s 2026-08-18 entry and `devops/manual.md`.
 
-`devops.terraform_backend` — **`blocked`** (2026-08-18), on a branch/PR, NOT merged. Terraform
-config for the S3 + DynamoDB remote state backend is fully written and ready to apply
-(`infra/terraform-bootstrap/`, `infra/terraform/backend.tf`+`provider.tf`+`main.tf`), but the
-`devops-agent` IAM user got real `AccessDenied` from AWS on `s3:CreateBucket` and
-`dynamodb:CreateTable` when the (explicitly human-authorized) bootstrap `terraform apply` was
-actually run. Full error text, the exact commands run, and the minimal IAM policy fix needed
-are in `devops/progress.md`'s 2026-08-18 entry — read that before touching this again.
-
-No AWS resources exist yet for this feature (confirmed: `aws s3api head-bucket` → 404, and
-`terraform state list` shows no real resources — the failed apply created nothing).
+**Not yet committed/PR'd**: the `devops.terraform_backend` status flip + this session's
+progress/manual.md updates are sitting as local changes as of this handoff — commit them on a
+branch/PR before starting anything else (see devops/AGENTS.md workflow rules — never commit to
+`main` directly).
 
 ## Next feature to work
 
-**Not a new feature — first, get `devops.terraform_backend` actually unblocked:**
-1. Someone with IAM admin access needs to grant `devops-agent` `s3:CreateBucket` +
-   related S3 bucket-config actions + `dynamodb:CreateTable` + related table actions (exact
-   list in `devops/progress.md`'s 2026-08-18 entry, "Minimal fix needed").
-2. Once granted, re-run (from `infra/terraform-bootstrap/`, `AWS_PROFILE=devops-agent`):
-   `terraform init` (already done, safe to skip) → `terraform plan -out=bootstrap.tfplan` →
-   `terraform apply bootstrap.tfplan`. Then re-run the three `devops.terraform_backend` verify
-   commands for real (`terraform init` in `infra/terraform/`, `terraform state list`, `aws
-   s3api get-bucket-versioning`), plus the concurrent-apply lock test (two `terraform apply`
-   processes racing in `infra/terraform-bootstrap/` — the sprint-contract's verification plan
-   has the detail). Only then flip `devops.terraform_backend` to `passing`.
-3. The branch `feat/devops-terraform-backend` already has the Terraform written — don't
-   recreate it, just re-run apply on it (or a fresh branch off it) once IAM is fixed.
+**`devops.terraform_oidc_github`** or **`devops.terraform_ecr`** (Tier 0, both `dependsOn:
+["devops.terraform_backend"]`, now unblocked). Both need their own scoped `devops-agent` IAM
+grant first — follow the same discover-by-running-it pattern documented in `devops/manual.md`
+(start with the grant already drafted there for `terraform_oidc_github`'s OIDC provider + role
+management, but expect a round 2/3 the same way `terraform_backend` needed — the AWS provider's
+post-create read-backs reliably need more read permissions than initially obvious; don't assume
+one grant is enough, test by actually running `terraform apply`).
 
-**After that unblocks**, `devops.terraform_oidc_github` and `devops.terraform_ecr` are the
-natural next picks — both `dependsOn: ["devops.terraform_backend"]` and both want this remote
-backend to exist before they provision anything.
+`devops-agent` already has a `scribe-devops-infra` managed policy attached (EC2/RDS/ECR/SSM,
+for later networking/compute/deploy features) — `terraform_ecr`'s `EcrRepos`/`EcrAuth`
+statements in that policy may already cover what it needs; check before drafting a new grant.
 
 **`devops.terraform_networking_rds`** / **`devops.terraform_compute_envs`** remain genuinely
 `blocked` for the reasons already on file (domain name for certbot; sequencing after
@@ -53,7 +46,12 @@ OIDC/ECR/backend). Unaffected by this session.
   `devops.ci_image_scan_trivy` later — CI will need a real reachable Postgres service container.
 - The web container's `/api/*` proxy behavior was inspected, not curl-tested end-to-end.
 - Domain name for certbot (`devops.terraform_compute_envs`) not yet decided.
-- **New this session:** `devops-agent` IAM user cannot self-inspect its own policy
-  (`iam:ListAttachedUserPolicies`/`ListUserPolicies`/`ListGroupsForUser` all `AccessDenied`
-  too) — whoever fixes the S3/DynamoDB permissions will need to check the IAM console or
-  CloudTrail directly rather than asking the agent to confirm the current policy.
+- `devops-agent` IAM user cannot self-inspect its own policy (`iam:ListAttachedUserPolicies`/
+  `ListUserPolicies`/`ListGroupsForUser` all `AccessDenied`) — verifying what's actually granted
+  requires the AWS console or an admin profile, not the agent asking itself.
+- **New this session:** granting `devops-agent` permissions via IAM policy JSON is genuinely
+  iterative in this account — expect 2-3 rounds per new AWS service touched (Terraform/AWS
+  provider read-backs need more granular read permissions than the acceptance criteria alone
+  suggest). Budget for this when picking up `terraform_oidc_github`/`terraform_ecr` rather than
+  assuming a single upfront grant will be enough. `devops/manual.md` is the running log of every
+  grant round so far — keep appending to it rather than starting fresh each time.
