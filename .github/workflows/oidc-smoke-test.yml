@@ -84,3 +84,5 @@ jobs:
             cat err2.log
             exit 1
           fi
+
+# trigger: re-touch to test pull_request-triggered OIDC assumption for real
