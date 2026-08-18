@@ -51,7 +51,7 @@
             "id": "devops.dockerfile_web",
             "tier": 0,
             "title": "Production Dockerfile for apps/web",
-            "status": "failing",
+            "status": "passing",
             "description": "Multi-stage Dockerfile for the Vite/React app: build stage runs `vite build`, final stage serves the static bundle via a slim nginx image, non-root, digest-pinned.",
             "acceptance": [
                 "Multi-stage build — final image is nginx serving only the built dist/, no node_modules or source.",
