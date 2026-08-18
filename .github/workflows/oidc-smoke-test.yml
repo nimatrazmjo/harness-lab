@@ -25,16 +25,6 @@ jobs:
   verify-oidc:
     runs-on: ubuntu-latest
     steps:
-      - name: DEBUG - decode actual OIDC token claims
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const token = await core.getIDToken('sts.amazonaws.com');
-            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-            console.log('aud:', payload.aud);
-            console.log('sub:', payload.sub);
-            console.log('iss:', payload.iss);
-
       - name: Assume scribe-github-actions-deploy via OIDC (no static keys)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -44,11 +34,20 @@ jobs:
       - name: Confirm no static credentials + correct identity
         run: |
           set -euo pipefail
-          if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
-            echo "FAIL: a static AWS_ACCESS_KEY_ID is set in this job — OIDC-only is required" >&2
+          # aws-actions/configure-aws-credentials always exports temporary STS credentials
+          # under AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY/AWS_SESSION_TOKEN regardless of auth
+          # method — that's how the AWS CLI picks them up. Presence of AWS_ACCESS_KEY_ID alone
+          # does NOT indicate a static long-lived key. The real distinguishing signals: a
+          # temporary STS session key is prefixed "ASIA" (a static IAM user key is "AKIA") and
+          # is always paired with a session token; a static key never has one.
+          if [ -z "${AWS_SESSION_TOKEN:-}" ]; then
+            echo "FAIL: no AWS_SESSION_TOKEN present — this looks like a static credential, not an OIDC-derived temporary one" >&2
             exit 1
           fi
-          echo "OK: no static AWS_ACCESS_KEY_ID present"
+          case "${AWS_ACCESS_KEY_ID:-}" in
+            ASIA*) echo "OK: AWS_ACCESS_KEY_ID is ASIA-prefixed (temporary STS session key)" ;;
+            *) echo "FAIL: AWS_ACCESS_KEY_ID is not ASIA-prefixed — looks like a static key, not OIDC-derived" >&2; exit 1 ;;
+          esac
           aws sts get-caller-identity
 
       - name: In-scope action succeeds (ecr:GetAuthorizationToken)
