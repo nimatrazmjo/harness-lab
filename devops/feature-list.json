@@ -72,7 +72,7 @@
             "id": "devops.terraform_backend",
             "tier": 0,
             "title": "Terraform remote state backend",
-            "status": "blocked",
+            "status": "passing",
             "description": "S3 bucket (versioned, encrypted) + DynamoDB lock table for Terraform state, bootstrapped once outside the main Terraform config to avoid a chicken-and-egg problem. Local state never committed.",
             "acceptance": [
                 "State bucket has versioning + SSE enabled, blocks public access.",
@@ -85,7 +85,7 @@
                 "aws s3api get-bucket-versioning --bucket <state-bucket> | grep -q Enabled"
             ],
             "dependsOn": [],
-            "rubric": "DevOps: IaC foundation. Blocked 2026-08-18: devops-agent IAM user lacks s3:CreateBucket / dynamodb:CreateTable (and iam:List* to self-diagnose) — real AccessDenied from AWS, not a toolchain issue. Terraform config is written and ready (infra/terraform-bootstrap/, infra/terraform/backend.tf); re-run `terraform apply` in infra/terraform-bootstrap/ once the IAM policy is widened. See devops/progress.md 2026-08-18 entry for exact errors and the minimal permission set needed."
+            "rubric": "DevOps: IaC foundation. Passing 2026-08-18: after three rounds of scoped IAM grants to devops-agent (see devops/manual.md), terraform apply in infra/terraform-bootstrap/ created the real S3 bucket + DynamoDB table; terraform init in infra/terraform/ succeeds against the remote backend with no local .tfstate; DynamoDB locking verified by a real concurrent-apply test (second plan blocked with 'Error acquiring the state lock', succeeded after the first released it)."
         },
         {
             "id": "devops.terraform_oidc_github",

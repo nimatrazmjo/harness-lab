@@ -14,16 +14,62 @@ purpose, so a product-coding session never has to load infra history into contex
 
 ## Current state
 
-`devops.dockerfile_api` and `devops.dockerfile_web` are both `passing` and merged to `main`.
-`devops.terraform_backend` is now `blocked` — Terraform config is fully written and ready
-(`infra/terraform-bootstrap/`, `infra/terraform/backend.tf`+`provider.tf`+`main.tf`) but the
-`devops-agent` IAM user does not have `s3:CreateBucket` / `dynamodb:CreateTable` (real
-`AccessDenied` from AWS, confirmed 2026-08-18 — see log entry below). `terraform_oidc_github`
-and `terraform_ecr` both `dependsOn` this and stay `failing`/blocked-by-extension until the
-IAM policy is widened and the bootstrap apply actually succeeds. The two AWS-account-blocked
-items (`terraform_networking_rds`, `terraform_compute_envs`) are unaffected/unchanged.
+`devops.dockerfile_api`, `devops.dockerfile_web`, and `devops.terraform_backend` are all
+`passing` and merged/committed to `main`. The remote state backend
+(`scribe-terraform-state-404063516240` S3 bucket + `scribe-terraform-locks` DynamoDB table) is
+real, provisioned, and verified — versioning/SSE/public-access-block all confirmed live,
+locking confirmed by an actual concurrent-apply test. `infra/terraform/` now has a real,
+non-empty remote state object (`scribe/terraform.tfstate`) after a zero-resource `apply` to
+initialize it. `devops.terraform_oidc_github` and `devops.terraform_ecr` are unblocked next
+(both `dependsOn` this feature, now satisfied) — need their own IAM grants for `devops-agent`
+first (see `devops/manual.md`). The two AWS-account-blocked items (`terraform_networking_rds`,
+`terraform_compute_envs`) are unaffected/unchanged.
 
 ## Log
+
+### 2026-08-18 — devops.terraform_backend: passing (real AWS, fully verified)
+
+Unblocked from the prior entry below via three rounds of scoped IAM grants to `devops-agent`
+(full detail, exact JSON, and root-cause analysis in `devops/manual.md`):
+
+1. **Round 1** (`s3:CreateBucket`, `dynamodb:CreateTable` + config actions, split into two
+   managed policies after an inline-policy attempt silently failed on IAM's 2,048-char inline
+   aggregate limit) — got `terraform apply` past `AccessDenied` on creation, but it then failed
+   on the AWS provider's post-create read-back (`s3:GetBucketPolicy`,
+   `dynamodb:DescribeContinuousBackups` denied), which **tainted** both resources in state
+   (wanted to destroy+recreate). `lifecycle.prevent_destroy` correctly blocked the replace — no
+   data loss, no actual destroy attempted. Cleared the false taint with `terraform untaint` on
+   both (the underlying AWS resources were fine).
+2. **Round 2** (broadened to `s3:Get*` / `dynamodb:Describe*`, scoped to just these two specific
+   resource ARNs — avoids granting anything on other buckets/tables, and avoids patching the AWS
+   provider's many auxiliary read calls one action at a time) — got `terraform plan` fully clean
+   (no more taint), but surfaced one more gap: `dynamodb:ListTagsOfResource` (outside the
+   `Describe*` namespace).
+3. **Round 3** (added `ListTagsOfResource` + `UntagResource`) — `terraform apply` succeeded
+   cleanly: `Apply complete! Resources: 3 added, 0 changed, 0 destroyed` (versioning, SSE
+   config, public-access-block — the bucket + table themselves were already live from round 1).
+
+**All three acceptance criteria verified for real:**
+- `aws s3api get-bucket-versioning` → `{"Status": "Enabled"}`; `get-public-access-block` → all
+  four flags `true`; `get-bucket-encryption` → `AES256`.
+- Concurrent-apply lock test: ran `terraform plan -lock-timeout=5s` in the background, then a
+  second `terraform plan -lock-timeout=1s` immediately after — second one failed with `Error
+  acquiring the state lock ... resource temporarily unavailable`, succeeded cleanly once the
+  first released it. Real proof the DynamoDB table blocks concurrent applies, not assumed.
+- `cd infra/terraform && terraform init` → `Terraform has been successfully initialized!`, no
+  local `.tfstate` created. `terraform state list` initially errored (`No state file was
+  found!`) — this is expected S3-backend behavior when the state key has never been written
+  (infra/terraform/main.tf has zero resources, never applied), not a permissions problem;
+  confirmed via `aws s3api list-objects-v2` showing no object at `scribe/terraform.tfstate`.
+  Ran one zero-resource `terraform apply` (creates no real infrastructure, just writes the
+  initial empty state file) to make `state list` match the literal verify command's expectation
+  (`# reachable, non-error even if empty`) — after that, `state list` exits 0 and the state
+  object exists in S3.
+
+`devops/feature-list.json` → `devops.terraform_backend` `passing`. Next: `devops.terraform_ecr`
+or `devops.terraform_oidc_github` (Tier 0, unblocked now that this dependency is satisfied) —
+each will need its own scoped `devops-agent` IAM grant first, following the same pattern
+documented in `devops/manual.md`.
 
 ### 2026-08-18 — devops.terraform_backend: blocked (IAM permissions, not toolchain)
 
