@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { BrandMark } from "../../components/BrandMark";
 import { useAuth } from "../../state/auth-context";
 
 export function LoginPage() {
@@ -27,7 +28,10 @@ export function LoginPage() {
   return (
     <div className="auth-shell">
       <form className="auth-card" onSubmit={onSubmit}>
-        <h1>AI Clinical Scribe</h1>
+        <div className="brand">
+          <BrandMark />
+          <h1>AI Clinical Scribe</h1>
+        </div>
         <p className="auth-subtitle">Provider sign in</p>
         <label htmlFor="email">Email</label>
         <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />

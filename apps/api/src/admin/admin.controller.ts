@@ -41,7 +41,7 @@ export class AdminController {
     @Query(new ZodValidationPipe(AdminEncounterFilterSchema)) filter: AdminEncounterFilter,
   ): Promise<Encounter[]> {
     const rows = await this.admin.listAllEncounters(filter);
-    return rows.map(toEncounterDto);
+    return rows.map((row) => toEncounterDto(row));
   }
 
   @Get("providers")

@@ -11,6 +11,16 @@ export type CreateEncounterRequest = z.infer<typeof CreateEncounterRequestSchema
 export const EncounterStatusSchema = z.enum(["draft", "generated", "saved"]);
 export type EncounterStatus = z.infer<typeof EncounterStatusSchema>;
 
+/** Only populated by GET /encounters/:id (the workspace's single-encounter fetch) — the patient
+ * identity a provider needs to confirm which chart they're editing. Omitted elsewhere (list,
+ * create, update) to avoid an extra join on every row. */
+export const EncounterPatientSummarySchema = z.object({
+  firstName: z.string(),
+  lastName: z.string(),
+  dob: z.string(),
+});
+export type EncounterPatientSummary = z.infer<typeof EncounterPatientSummarySchema>;
+
 export const EncounterSchema = z.object({
   id: z.string().uuid(),
   providerId: z.string().uuid(),
@@ -20,6 +30,7 @@ export const EncounterSchema = z.object({
   transcript: z.string().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  patient: EncounterPatientSummarySchema.optional(),
 });
 export type Encounter = z.infer<typeof EncounterSchema>;
 

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Encounter } from "@scribe/shared-types";
 import { encountersApi } from "../../api/encounters";
+import { BrandMark } from "../../components/BrandMark";
 import { useAuth } from "../../state/auth-context";
 
 export function EncounterListPage() {
@@ -39,10 +40,13 @@ export function EncounterListPage() {
   return (
     <div className="workspace-shell">
       <header className="app-header">
-        <h1>AI Clinical Scribe</h1>
+        <div className="brand">
+          <BrandMark />
+          <h1>AI Clinical Scribe</h1>
+        </div>
         <div className="app-header__user">
           <span>{user?.name}</span>
-          <button type="button" onClick={logout}>
+          <button type="button" className="btn-secondary" onClick={logout}>
             Sign out
           </button>
         </div>

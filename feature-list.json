@@ -396,6 +396,32 @@
             "rubric": "Admin dashboard: nav must lead to working pages, not placeholders"
         },
         {
+            "id": "ui.professional_redesign",
+            "tier": 1,
+            "title": "Professional design pass across provider + admin UI",
+            "status": "passing",
+            "description": "A live walkthrough (2026-08-18) of login, encounter list, encounter workspace (incl. a generated note), and all 4 admin pages found the UI does not read as a high-trust clinical tool, violating AGENTS.md §1's 'clean, dense, professional' requirement. Concrete findings: (1) SAFETY GAP — the encounter workspace shows no patient name/DOB anywhere, so a provider with multiple tabs open cannot confirm whose chart they're editing; (2) one accent blue is used for every button with no semantic distinction — 'Delete'/'Deactivate' look identical to 'Save'/'Create', no danger styling on destructive actions despite --danger tokens already existing in styles.css (only used for error text); (3) SOAP note sections are fixed-height monospace <textarea>s that clip content behind an internal scrollbar — reads like a code editor, not a clinical note; (4) no brand mark anywhere, just a text wordmark; (5) encounter-list/version-history row hover inverts the whole row to solid navy — heavy-handed for a dense clinical list; (6) almost no type scale — 14px body nearly everywhere; (7) native <select>/<input type=date> look visually inconsistent with the custom-styled text inputs/buttons around them; (8) workspace's 3-column panel grid has ragged, misaligned panel bottoms. Scope covers BOTH the provider workspace and the admin shell (user confirmed 'everything' when asked). Direction: Claude proposes the design system (user confirmed, no external reference given) — keep the existing neutral ink/canvas palette but formalize a real type scale and semantic button variants (primary/secondary/danger), add a persistent patient-identity header to the workspace, and a small brand mark in both shells. SOAP note editor: auto-growing sections in a normal readable font, replacing the fixed-height monospace textareas (user confirmed this interaction change).",
+            "acceptance": [
+                "Encounter workspace shows a persistent patient identity header (first + last name, DOB) so the open chart is unambiguous at a glance — the safety-relevant gap, non-negotiable.",
+                "A defined button system with primary/secondary/danger variants is applied consistently everywhere: Save/Create/Generate/Add = primary, Edit/Cancel = secondary, Delete/Deactivate = danger. No destructive action shares styling with a constructive one.",
+                "SOAP note sections (Subjective/Objective/Assessment/Plan) auto-grow to their content in a normal (non-monospace) readable font — no fixed-height internal scrollbar.",
+                "A defined type scale (distinct, consistent sizes/weights for page title / section header / label / body) replaces the near-uniform 14px treatment, applied across both the provider workspace and admin shell.",
+                "A small brand mark (icon/logo, not just a text wordmark) appears in both the provider header and the admin header.",
+                "List/table row hover states use a subtle highlight (e.g. tinted background + accent border), not a full solid-color inversion — covers the encounter list, version history list, and admin tables.",
+                "Native form controls (select, date input) are visually consistent with text inputs (border, radius, height, focus ring) in both the workspace and admin filters/forms.",
+                "The workspace's 3-column panel grid has consistent, non-ragged panel bottoms at common viewport widths.",
+                "No regression: `pnpm verify` stays green; existing component tests updated for any changed markup, unchanged in intent."
+            ],
+            "tests": [
+                "apps/web/src/features/encounter/__tests__/input.test.tsx",
+                "apps/web/src/features/note/__tests__/edit.test.tsx",
+                "apps/web/src/features/admin/__tests__/*.test.tsx",
+                "Manual: live browser walkthrough of login / encounter list / workspace (incl. a generated note) / all 4 admin pages, screenshotted before and after"
+            ],
+            "dependsOn": ["admin.nav_wired", "note.inline_edit", "encounter.input"],
+            "rubric": "UI quality: professional, high-trust clinical tool feel (AGENTS.md §1)"
+        },
+        {
             "id": "session.draft_persist",
             "tier": 1,
             "title": "Draft persistence across refresh",

@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { BrandMark } from "../../components/BrandMark";
 import { useAuth } from "../../state/auth-context";
 
 const ADMIN_SECTIONS = [
@@ -18,10 +19,13 @@ export function AdminShell() {
   return (
     <div className="admin-shell">
       <header className="app-header admin-shell__header">
-        <h1>Admin</h1>
+        <div className="brand">
+          <BrandMark />
+          <h1>Admin</h1>
+        </div>
         <div className="app-header__user">
           <span>{user?.name}</span>
-          <button type="button" onClick={logout}>
+          <button type="button" className="btn-secondary" onClick={logout}>
             Sign out
           </button>
         </div>

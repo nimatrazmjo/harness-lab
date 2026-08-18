@@ -4,11 +4,23 @@
   --line: #d0d5dd;
   --surface: #ffffff;
   --canvas: #f7f8fa;
+  --canvas-hover: #eef2f7;
   --accent: #175cd3;
   --accent-dark: #0a3f9c;
   --danger: #b42318;
+  --danger-dark: #8c1c13;
   --danger-bg: #fef3f2;
   --radius: 6px;
+
+  /* Type scale — an eyebrow label (--fs-2xs/--fs-xs), body/controls (--fs-sm/--fs-base),
+     and a real page-title size (--fs-lg) so headings read as hierarchy, not uniform 14px. */
+  --fs-2xs: 0.6875rem;
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-base: 0.875rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.25rem;
+
   font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
 }
 
@@ -30,19 +42,21 @@ h2 {
 }
 
 h1 {
-  font-size: 1.1rem;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 h2 {
-  font-size: 0.95rem;
+  font-size: var(--fs-xs);
   color: var(--ink-muted);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
 }
 
 label {
   display: block;
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--ink-muted);
   margin: 0.6rem 0 0.25rem;
@@ -56,23 +70,50 @@ textarea {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   font: inherit;
+  font-size: var(--fs-base);
   color: var(--ink);
   background: var(--surface);
 }
 
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 textarea {
   resize: vertical;
-  font-family: ui-monospace, monospace;
-  line-height: 1.4;
+  line-height: 1.5;
+}
+
+select {
+  appearance: none;
+  padding-right: 1.9rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23475467' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 10px 6px;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
 }
 
 button {
   margin-top: 0.75rem;
   padding: 0.5rem 1rem;
-  border: none;
+  border: 1px solid transparent;
   border-radius: var(--radius);
   background: var(--accent);
   color: white;
+  font-size: var(--fs-base);
   font-weight: 600;
   cursor: pointer;
 }
@@ -86,11 +127,53 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Secondary — neutral, adapts to light or dark surroundings via currentColor. Used for
+   non-primary actions (Sign out, Cancel, Edit) so they don't compete with the primary CTA. */
+button.btn-secondary {
+  background: transparent;
+  color: inherit;
+  border-color: var(--line);
+}
+
+button.btn-secondary:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+/* Danger — reserved for destructive actions (Delete, Deactivate) so they're never visually
+   interchangeable with a constructive one (Save, Create). */
+button.btn-danger {
+  background: var(--danger);
+  color: white;
+}
+
+button.btn-danger:hover:not(:disabled) {
+  background: var(--danger-dark);
+}
+
 .link-button {
   background: none;
   color: var(--accent);
   padding: 0;
   margin: 0;
+  border: none;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.brand h1 {
+  margin: 0;
+}
+
+.auth-card .brand {
+  margin-bottom: 0.5rem;
+}
+
+.brand-mark {
+  flex-shrink: 0;
 }
 
 .auth-shell {
@@ -149,12 +232,42 @@ button:disabled {
   margin: 0 auto;
 }
 
+.workspace-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 1rem;
+}
+
+.workspace-header__patient {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.workspace-header__patient-name {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-header__patient-dob {
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
 .workspace-grid {
   display: grid;
   grid-template-columns: 1.1fr 1.3fr 0.8fr;
   gap: 1rem;
   padding: 1.25rem;
-  align-items: start;
+  align-items: stretch;
 }
 
 .panel {
@@ -204,6 +317,12 @@ button:disabled {
   color: var(--ink);
   font-weight: 400;
   margin-top: 0.4rem;
+  border-color: var(--line);
+}
+
+.encounter-list li button:hover:not(:disabled) {
+  background: var(--canvas-hover);
+  border-color: var(--accent);
 }
 
 .encounter-list__empty {
@@ -223,10 +342,16 @@ button:disabled {
 
 .note-editor__label-static {
   display: block;
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--ink-muted);
   margin: 0.6rem 0 0.25rem;
+}
+
+.auto-grow-textarea {
+  resize: none;
+  overflow: hidden;
+  min-height: 3.2rem;
 }
 
 .icd10-chip-list {
@@ -318,6 +443,12 @@ button:disabled {
   font-weight: 400;
   margin-top: 0.4rem;
   text-align: left;
+  border-color: var(--line);
+}
+
+.version-history__item:hover:not(:disabled) {
+  background: var(--canvas-hover);
+  border-color: var(--accent);
 }
 
 .version-history__item--selected {
@@ -539,6 +670,14 @@ button:disabled {
   text-align: left;
   padding: 0.5rem 0.6rem;
   border-bottom: 1px solid var(--line);
+}
+
+.admin-table td button {
+  margin-top: 0;
+}
+
+.admin-table td button + button {
+  margin-left: 0.5rem;
 }
 
 .admin-table th {

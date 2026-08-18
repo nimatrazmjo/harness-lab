@@ -113,7 +113,12 @@ export function AdminRosterPage() {
               <td>{p.isActive ? "Active" : "Deactivated"}</td>
               <td>
                 {p.isActive && (
-                  <button type="button" onClick={() => onDeactivate(p.id)} disabled={busyId === p.id}>
+                  <button
+                    type="button"
+                    className="btn-danger"
+                    onClick={() => onDeactivate(p.id)}
+                    disabled={busyId === p.id}
+                  >
                     {busyId === p.id ? "Deactivating..." : "Deactivate"}
                   </button>
                 )}

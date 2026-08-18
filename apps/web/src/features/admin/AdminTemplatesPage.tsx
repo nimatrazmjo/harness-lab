@@ -96,7 +96,7 @@ export function AdminTemplatesPage() {
             {saving ? "Saving..." : editingId ? "Save changes" : "Create template"}
           </button>
           {editingId && (
-            <button type="button" onClick={onCancelEdit} disabled={saving}>
+            <button type="button" className="btn-secondary" onClick={onCancelEdit} disabled={saving}>
               Cancel
             </button>
           )}
@@ -123,10 +123,15 @@ export function AdminTemplatesPage() {
               <td>{t.name}</td>
               <td>{t.encounterType}</td>
               <td>
-                <button type="button" onClick={() => onEdit(t)}>
+                <button type="button" className="btn-secondary" onClick={() => onEdit(t)}>
                   Edit
                 </button>
-                <button type="button" onClick={() => onDelete(t.id)} disabled={busyId === t.id}>
+                <button
+                  type="button"
+                  className="btn-danger"
+                  onClick={() => onDelete(t.id)}
+                  disabled={busyId === t.id}
+                >
                   {busyId === t.id ? "Deleting..." : "Delete"}
                 </button>
               </td>
