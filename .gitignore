@@ -9,3 +9,16 @@ coverage/
 .DS_Store
 .turbo/
 .pnpm-store/
+
+# Terraform — state and local caches are never committed. Real config (*.tf) is.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
