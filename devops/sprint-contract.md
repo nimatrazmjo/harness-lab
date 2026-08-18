@@ -20,11 +20,25 @@ quietly get marked `passing` on a plan-only or mocked basis.
 
 ---
 
+## Prior sprint outcome — devops.dockerfile_web (2026-08-18)
+
+All four Done conditions met with real evidence; all four literal `verify` commands run
+end-to-end and green (build exit 0, container stays up, `curl -f / | grep -qi 'AI Clinical
+Scribe'` matched, clean `docker stop`); extra evidence for "non-root" (`id` -> `uid=101(nginx)`)
+and "no source/node_modules shipped" (`find` inside the container for both -> empty), plus
+`nginx -t` + a read-through confirming the templated `/api/*` config mirrors
+`infra/nginx.conf`'s rewrite/proxy_buffering rules (not curl-tested — no linked API container
+in this sprint's smoke test). No static AWS creds, no `latest` tag, no-touch zone respected
+(`infra/nginx.conf` read-only, nothing under `apps/*/src` or `libs/**` touched). Full detail:
+`devops/progress.md` (2026-08-18 entry) and `devops/session-handoff.md`. Status flipped to
+`passing` in `devops/feature-list.json`, committed on `feat/devops-dockerfile-web`.
+
 ## Active sprint
 
-**Feature(s):** _none yet — fill this in before starting `devops.dockerfile_web`, the natural
-next pick (Tier 0, unblocked, no AWS needed; same shape as `devops.dockerfile_api`, now
-`passing` — see `devops/session-handoff.md` for lessons learned that transfer)._
+**Feature(s):** _none yet — both Tier 0 Dockerfile items are now `passing` and merged to
+`main`. Next real candidate: `devops.terraform_backend` (S3 + DynamoDB state backend) — needs
+real AWS provisioning (confirmed available via the `devops-agent` profile this session), so get
+explicit user go-ahead before starting, unlike the Dockerfile items which were fully local._
 
 **Goal (one sentence):** _—_
 

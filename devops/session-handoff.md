@@ -5,56 +5,56 @@ protocol. Separate from the repo-root `session-handoff.md` on purpose._
 
 ## Where things stand
 
-`devops.dockerfile_api` is `passing` (2026-08-18) — `apps/api/Dockerfile` exists, built and
-smoke-tested for real (see `devops/progress.md` for the full verify output). Branch
-`feat/devops-dockerfile-api`, PR open (see below for URL once created). Everything else in
-`devops/feature-list.json` (15 remaining features) is still `failing` or `blocked`.
+Both Tier 0 Dockerfile items are `passing` and merged to `main`:
+- `devops.dockerfile_api` — `passing`. Branch `feat/devops-dockerfile-api`, PR
+  https://github.com/nimatrazmjo/harness-lab/pull/5, merged.
+- `devops.dockerfile_web` — `passing`. Branch `feat/devops-dockerfile-web`, PR
+  https://github.com/nimatrazmjo/harness-lab/pull/6, merging now (this branch was rebased/
+  merged against `main` post-#5 to resolve the expected `.dockerignore` + tracking-file
+  conflict — see progress.md).
+
+All Tier 0 items that need no AWS access are now done. Only three Tier 0 items remain:
+`terraform_backend`, `terraform_oidc_github`, `terraform_ecr` (all unblocked, need real AWS),
+plus the two genuinely `blocked` items below.
+
+AWS credentials ARE confirmed working this session (`devops/init.sh` resolved
+`arn:aws:iam::404063516240:user/devops-agent` via `AWS_PROFILE=devops-agent`) — unlike what
+an earlier handoff assumed, real-AWS Tier 0 items (`terraform_backend`,
+`terraform_oidc_github`, `terraform_ecr`) are NOT actually blocked on account access anymore.
+They involve provisioning real (if small/reversible) AWS resources — S3 bucket, DynamoDB
+table, IAM OIDC provider/role — which is a bigger step than a local Docker build. Flag this to
+the user before provisioning anything real; don't just auto-provision because credentials
+happen to resolve.
 
 ## Next feature to work
 
-**`devops.dockerfile_web`** (Tier 0, unblocked, no AWS needed) — the natural next pick, same
-shape as the API one just finished.
+**`devops.terraform_backend`** (Tier 0, unblocked, needs real AWS — S3 + DynamoDB state
+backend, bootstrapped once outside the main Terraform config). This is the natural next pick
+since `devops.terraform_oidc_github` and `devops.terraform_ecr` will want a remote state
+backend to write into rather than local `.tfstate` (never committed, and AGENTS.md's
+clean-state gates assume no local state file left behind). Get explicit user go-ahead before
+provisioning real AWS resources, unlike the Dockerfile items which were fully local.
 
-Things learned building the API Dockerfile that likely transfer:
-- This is a pnpm workspace monorepo (`apps/*`, `libs/*`). A build stage needs the full
-  workspace manifest set copied first (`pnpm-lock.yaml`, `pnpm-workspace.yaml`, every workspace
-  member's `package.json`, root `tsconfig.base.json`) before `pnpm install --frozen-lockfile`
-  will resolve correctly — apps/web also depends on `@scribe/shared-types` (workspace:*), so its
-  build stage needs that lib built too, same pattern as the API's.
-- `packageManager: pnpm@11.13.1` needs Node **>=22.13** to run at all — use `node:22-slim`
-  (or newer), not `node:20-slim`, as the base image, regardless of what the workspace's
-  `engines` field says. Confirmed by hitting `ERR_UNKNOWN_BUILTIN_MODULE node:sqlite` under
-  Node 20.
-- `pnpm install --frozen-lockfile --prod` (to strip devDependencies before the final COPY)
-  needs `CI=true` set, else it aborts non-interactively
-  (`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`).
-- The web acceptance criteria call for nginx-unprivileged (or equivalent) serving static
-  `dist/` — that's a different runtime-stage shape than the API's (no node_modules/pnpm
-  concerns at all in the final image, since it's pure static files behind nginx). Pin nginx's
-  base image by digest the same way.
-- The web Dockerfile's verify command curls `/` for the app shell and expects the nginx
-  container to also proxy `/api/*` per `infra/nginx.conf`'s existing rewrite rule — read that
-  file before writing the Dockerfile's nginx config, don't invent a different one.
-
-Do NOT start `devops.terraform_networking_rds` / `devops.terraform_compute_envs` — both
-`blocked` on real AWS account access. Everything else in Tier 0
-(`devops.terraform_backend`, `devops.terraform_oidc_github`, `devops.terraform_ecr`) needs an
-AWS account too (to actually provision and `verify` against), so if account access still isn't
-available, `devops.dockerfile_web` is the only real progress possible next session.
+**`devops.terraform_networking_rds`** / **`devops.terraform_compute_envs`** remain genuinely
+`blocked` — not on AWS access, but on: a decided domain name for certbot
+(`terraform_compute_envs`), and generally being larger/riskier applies best done after the
+OIDC/ECR/backend foundation exists so CI can eventually own `terraform apply` (per
+devops/AGENTS.md: "`terraform apply` only ever runs from CI on merge to main" — running it
+locally against real/shared infra state should stay rare and explicit).
 
 ## Known gaps
 
-- No AWS account connected yet — confirm with the user before attempting anything that needs
-  `verify` commands to run against real AWS (Terraform apply, ECR push, etc.). Dockerfile items
-  can be fully built and `verify`-tested locally with plain `docker build`/`docker run` — no AWS
-  needed.
-- Domain name for certbot (`devops.terraform_compute_envs`) not yet decided — ask before
-  provisioning DNS/cert resources.
 - `GET /health` (`apps/api/src/health/health.controller.ts`) queries the DB pool directly — it
   is NOT a DB-independent liveness check. The API Dockerfile's smoke test works around this by
   pointing at the already-running local `infra/docker-compose.yml` postgres via
-  `host.docker.internal:5433` (see `apps/api/.env.example`). This is fine for local
-  verification but worth knowing: any CI environment that runs this same smoke test will need
-  an actual reachable Postgres too (e.g. a service container), not just `AI_PROVIDER=mock` —
-  relevant for `devops.ci_build_validation` (dependsOn `devops.dockerfile_api`,
-  `devops.dockerfile_web`) when that's picked up.
+  `host.docker.internal:5433` (see `apps/api/.env.example`). Relevant for
+  `devops.ci_build_images` / `devops.ci_image_scan_trivy` later — CI will need a real reachable
+  Postgres service container for the API image's health check to pass, not just
+  `AI_PROVIDER=mock`.
+- The web container's `/api/*` proxy behavior was inspected (rendered nginx conf +
+  `nginx -t`), not curl-tested — the feature's literal `verify` command never links an API
+  container, so the proxy path was never actually exercised end-to-end. Worth a real
+  docker-compose-based smoke test (API + web + real `/api/*` round trip) at some point, maybe
+  as part of `devops.ci_build_images`.
+- Domain name for certbot (`devops.terraform_compute_envs`) not yet decided — ask before
+  provisioning DNS/cert resources.
