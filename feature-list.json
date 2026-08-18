@@ -371,6 +371,31 @@
             "rubric": "Admin dashboard: templates take effect immediately"
         },
         {
+            "id": "admin.nav_wired",
+            "tier": 1,
+            "title": "Admin: wire shell nav to real pages",
+            "status": "passing",
+            "description": "The /admin shell's nav (Encounters, Roster, Templates, Audit Log) currently renders as static <li> text with no routes behind it — clicking any item does nothing. Backend endpoints for all four sections already exist (GET /admin/encounters, GET/POST /admin/providers + deactivate, templates CRUD, GET /admin/audit-logs) but nothing in the frontend calls them. Wire each nav item to a real nested route + page that calls the existing API and renders real data.",
+            "acceptance": [
+                "Each of the four nav items is a real link (e.g. NavLink) to a nested route under /admin, not inert text.",
+                "/admin index redirects to /admin/encounters; AdminRoute's admin-only gate still covers every nested route.",
+                "Encounters page lists all encounters via GET /admin/encounters and supports provider + date-range filters.",
+                "Roster page lists providers via GET /admin/providers, can create a provider (POST) and deactivate one (PATCH .../deactivate).",
+                "Templates page lists templates and supports create/edit/delete via the templates CRUD endpoints.",
+                "Audit Log page lists entries via GET /admin/audit-logs, filterable by actor/action/date-range.",
+                "No nav item leads to a dead/placeholder page — each renders real data from its backend endpoint."
+            ],
+            "tests": [
+                "apps/web/src/features/admin/__tests__/shell.test.tsx (nav items navigate to real routes)",
+                "apps/web/src/features/admin/__tests__/encounters-page.test.tsx",
+                "apps/web/src/features/admin/__tests__/roster-page.test.tsx",
+                "apps/web/src/features/admin/__tests__/templates-page.test.tsx",
+                "apps/web/src/features/admin/__tests__/audit-log-page.test.tsx"
+            ],
+            "dependsOn": ["admin.shell_route", "admin.view_all", "admin.roster", "admin.templates_crud", "audit.trail"],
+            "rubric": "Admin dashboard: nav must lead to working pages, not placeholders"
+        },
+        {
             "id": "session.draft_persist",
             "tier": 1,
             "title": "Draft persistence across refresh",
