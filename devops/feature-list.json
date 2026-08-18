@@ -91,7 +91,7 @@
             "id": "devops.terraform_oidc_github",
             "tier": 0,
             "title": "GitHub Actions federated AWS auth (OIDC, no static keys)",
-            "status": "blocked",
+            "status": "passing",
             "description": "IAM OIDC identity provider trusting token.actions.githubusercontent.com, plus an IAM role GitHub Actions assumes via aws-actions/configure-aws-credentials. Trust policy scoped to this repo and specific ref patterns (main, pull_request) — not org-wide. Policy is least-privilege: ecr:*  scoped to the two repos, ssm:SendCommand scoped to the deploy tag, no wildcard admin.",
             "acceptance": [
                 "No AWS access key / secret key exists anywhere in GitHub secrets or the codebase — auth is 100% OIDC (AGENTS.md [SECRETS]).",
@@ -104,7 +104,7 @@
                 "aws iam simulate-principal-policy --policy-source-arn <role-arn> --action-names ecr:PutImage --resource-arns 'arn:aws:ecr:*:*:repository/unrelated-repo' | grep -q implicitDeny"
             ],
             "dependsOn": ["devops.terraform_backend"],
-            "rubric": "DevOps: federated auth, zero static credentials. Blocked 2026-08-18: Terraform applied cleanly (OIDC provider + scribe-github-actions-deploy role + least-privilege policy all real and live), trust policy confirmed scoped to repo:nimatrazmjo/harness-lab:* (not repo:*) via `aws iam get-role` — 2 of 3 minimum verify proofs done. Blocked on `iam:SimulatePrincipalPolicy` AccessDenied for devops-agent (exact fix in devops/manual.md Step 8) and a GitHub platform quirk where pull_request/workflow_dispatch triggers for a brand-new workflow file don't fire until it exists on the default branch (self-resolves on merge — see devops/manual.md). PR #9 open on feat/devops-terraform-oidc-github, not merged."
+            "rubric": "DevOps: federated auth, zero static credentials. Passing 2026-08-18: OIDC provider + scribe-github-actions-deploy role + least-privilege policy all real and live in AWS. Full oidc-smoke-test.yml GitHub Actions run succeeded end-to-end via a real pull_request trigger (PR #10): role assumed via OIDC with zero static keys, temporary STS credentials confirmed (ASIA-prefixed + session token), in-scope ECR/SSM actions succeeded, out-of-scope ECR repo and iam:ListUsers both genuinely denied by AWS. simulate-principal-policy also confirmed least-privilege scoping directly. Three real bugs found and fixed along the way (see devops/progress.md): a YAML syntax error that silently failed every run since the workflow's creation, an OIDC trust policy mismatched against GitHub's actual immutable-ID subject-claim format for this repo, and a credential-check logic bug that conflated env-var presence with static-key usage."
         },
         {
             "id": "devops.terraform_ecr",
