@@ -271,6 +271,51 @@ then retry.
 
 ---
 
+## Step 8 — Round 4: `iam:SimulatePrincipalPolicy` for verifying `devops.terraform_oidc_github`
+
+The OIDC provider + `scribe-github-actions-deploy` role are already created and confirmed live
+(`aws iam get-open-id-connect-provider`, `aws iam get-role` both succeed and show the correct
+trust policy). But the feature's required verification proof
+(`aws iam simulate-principal-policy --policy-source-arn <role-arn> --action-names ecr:PutImage
+--resource-arns 'arn:aws:ecr:*:*:repository/unrelated-repo'`) fails:
+
+```
+An error occurred (AccessDenied) when calling the SimulatePrincipalPolicy operation: User:
+arn:aws:iam::404063516240:user/devops-agent is not authorized to perform:
+iam:SimulatePrincipalPolicy on resource:
+arn:aws:iam::404063516240:role/scribe-github-actions-deploy because no identity-based policy
+allows the iam:SimulatePrincipalPolicy action
+```
+
+This is read-only (doesn't grant any ability to assume or modify the role) and narrowly scoped.
+Add to the `scribe-devops-bootstrap` managed policy's `GithubActionsRoleManage` statement's
+action list (or a new statement with the same resource):
+
+```json
+{"Sid": "SimulateOidcRolePolicy", "Effect": "Allow", "Action": "iam:SimulatePrincipalPolicy", "Resource": "arn:aws:iam::404063516240:role/scribe-github-actions-deploy"}
+```
+
+Same `create-policy-version --set-as-default` process as Steps 6a/7. Once granted, re-run the
+`simulate-principal-policy` verify command from `devops/sprint-contract.md`'s Active sprint for
+`devops.terraform_oidc_github` — expect `implicitDeny` for `ecr:PutImage` on
+`unrelated-repo` and `allowed` for the same action on `arn:aws:ecr:*:*:repository/scribe-api`.
+
+**Separate, non-IAM blocker on the same feature (informational, not something to grant):** the
+`.github/workflows/oidc-smoke-test.yml` workflow (committed on `feat/devops-terraform-oidc-github`,
+PR #9) does not execute yet — `pull_request` events for it show `total_count: 0` and
+`gh workflow run oidc-smoke-test.yml --ref feat/devops-terraform-oidc-github` fails with
+`Workflow does not have 'workflow_dispatch' trigger`, even though the file on that branch
+clearly has both triggers. This is a GitHub Actions platform behavior: `pull_request`- and
+`workflow_dispatch`-triggered workflows aren't dispatchable/registered for a repo until the
+workflow file exists on the **default branch**. Confirmed via `gh api
+repos/nimatrazmjo/harness-lab/actions/permissions` (Actions enabled, `allowed_actions: all`,
+not a config issue) and `gh api repos/.../actions/workflows` (the workflow IS catalogued, just
+not dispatchable pre-merge). This will self-resolve the first time this PR (or any PR
+containing the workflow file) merges to `main` — no grant needed, just document it so a future
+session doesn't re-diagnose it from scratch.
+
+---
+
 ## Log
 
 - **2026-08-18** — First grant attempt (inline user policy) had no effect: `terraform apply`
@@ -295,3 +340,15 @@ then retry.
   (versioning, encryption config, public-access-block). One more DynamoDB gap surfaced:
   `dynamodb:ListTagsOfResource` denied — outside the `dynamodb:Describe*` wildcard's namespace.
   Step 7 adds it (plus `UntagResource` for completeness).
+- **2026-08-18** — `devops.terraform_oidc_github`: the OIDC provider + IAM role themselves
+  applied cleanly on the FIRST try (no new grant needed — Step 1's `OidcProviderManage` /
+  `GithubActionsRoleManage` statements already covered `CreateOpenIDConnectProvider`/
+  `CreateRole`/`PutRolePolicy` and their read-backs). `terraform apply`: `3 added, 0 changed, 0
+  destroyed`. Confirmed live via `aws iam get-open-id-connect-provider` and `aws iam get-role`
+  (trust policy correctly scoped to `repo:nimatrazmjo/harness-lab:*`, not `repo:*`). The
+  required verify command `aws iam simulate-principal-policy` then hit a NEW gap —
+  `iam:SimulatePrincipalPolicy` itself denied (not covered by any existing statement, since
+  it's a verification/testing action, not a create/manage action). Step 8 above documents the
+  exact fix. Feature left `blocked` in `devops/feature-list.json`, not faked `passing` — 2 of
+  the 3 minimum required proofs (`get-role`, `get-open-id-connect-provider`) are done for real;
+  the third (`simulate-principal-policy`) needs Step 8's grant.

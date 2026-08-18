@@ -46,10 +46,45 @@ opened (not merged — see devops/session-handoff.md for the URL). Next action i
 not more Terraform work — re-run this same sprint once `devops-agent` has the needed
 permissions.
 
+## Sprint outcome — devops.terraform_oidc_github (2026-08-18) — BLOCKED, not passing
+
+Terraform applied cleanly on the first `terraform apply` (`3 added, 0 changed, 0 destroyed`) —
+`aws_iam_openid_connect_provider.github_actions`, `aws_iam_role.github_actions_deploy`,
+`aws_iam_role_policy.github_actions_deploy_permissions` all real and live. Confirmed via
+`aws iam get-open-id-connect-provider` (issuer + thumbprint) and `aws iam get-role` (trust
+policy scoped to `repo:nimatrazmjo/harness-lab:ref:refs/heads/main` +
+`repo:nimatrazmjo/harness-lab:pull_request` — NOT `repo:*`). 2 of 3 minimum verify proofs done
+for real. Blocked on:
+1. `aws iam simulate-principal-policy` — real `AccessDenied` for `devops-agent` on
+   `iam:SimulatePrincipalPolicy` itself (not a create/manage action, wasn't in the existing
+   grant). Exact fix documented in `devops/manual.md` Step 8.
+2. The committed `.github/workflows/oidc-smoke-test.yml` (PR #9, branch
+   `feat/devops-terraform-oidc-github`) doesn't execute yet — GitHub doesn't dispatch/trigger
+   `pull_request`/`workflow_dispatch` workflows for a file that only exists on a non-default
+   branch. Self-resolves on merge; not an IAM issue, no grant needed.
+
+Left `status: blocked` in `devops/feature-list.json` with the precise reason, per
+`devops/manual.md`/`devops/AGENTS.md`'s "don't fake passing" rule. PR #9 open, not merged.
+Full detail: `devops/progress.md` 2026-08-18 entry, `devops/manual.md` Step 8 + Log.
+
 ## Active sprint
 
-**Feature(s):** `devops.terraform_oidc_github` — `devops.terraform_backend` is now `passing`
-(real S3+DynamoDB remote state, confirmed 2026-08-18), so this Tier 0 item is unblocked.
+**Feature(s):** _none — `devops.terraform_oidc_github` is `blocked` on an IAM permissions
+grant (see above), not resumable by an agent alone. `devops.terraform_ecr` `dependsOn` it and
+shouldn't start until it's actually `passing`. Next `/devops` session should first check
+whether Step 8's IAM grant landed and/or PR #9 merged (which would unstick the smoke-test
+workflow too); if neither, there is no unblocked Tier 0 item left to work — flag that back to
+the user rather than jumping to Tier 1._
+
+**Goal (one sentence):** _—_
+
+**Tier:** _—_ · **Branch:** _—_
+
+---
+
+## Superseded draft — was filled in before the IAM/platform blockers were hit (kept for the
+concrete approach and Done-condition checklist, still valid once Step 8's grant lands and/or
+PR #9 merges)
 
 **Goal (one sentence):** Create an IAM OIDC identity provider trusting
 `token.actions.githubusercontent.com` + an IAM role GitHub Actions assumes via
