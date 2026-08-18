@@ -11,18 +11,24 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 3. `sprint-contract.md` must be filled in FRESH for the feature you're about to work, BEFORE
    writing code. `evaluator-rubric.md` must score the finished work PASS/CONDITIONAL AFTER,
    by a **separate subagent** (`Agent` tool, `general-purpose`, NOT `fork` — it must not inherit
-   your context). Self-grading skews positive — proven six times now across five sprints.
-4. **If the evaluator flags an invariant interpretation as ambiguous, don't resolve it yourself.**
+   your context). Self-grading skews positive — proven six times now across six sprints.
+4. **Before trusting `feature-list.json`/`AGENTS.md` as-is, sanity-check them against `git log`
+   and `progress.md`.** This session found both files reverted to a stale pre-Tier-1/2-complete
+   draft in the uncommitted working tree (all statuses back to `failing`, a clarification
+   paragraph dropped) with one genuinely new feature (`admin.shell_route`) added on top. Diffing
+   the working tree against `git show HEAD:<file>` caught it immediately — don't assume an
+   uncommitted `feature-list.json` is authoritative just because it's what's on disk.
+5. **If the evaluator flags an invariant interpretation as ambiguous, don't resolve it yourself.**
    Surface it to the user with `AskUserQuestion`, then record the resolution in `AGENTS.md` §2
    itself so it's settled for good (see "TENANT-ISOLATION clarified" below).
-5. **If an evaluator's non-blocking recommendation is cheap to close, close it same-session** —
-   every CONDITIONAL across all 5 Tier 1 sprints was closed this way. None was left outstanding.
-6. **If a feature's acceptance criteria aren't actually true yet (not just untested), fix the
+6. **If an evaluator's non-blocking recommendation is cheap to close, close it same-session** —
+   every CONDITIONAL across all Tier 1/2 sprints has been closed this way. None left outstanding.
+7. **If a feature's acceptance criteria aren't actually true yet (not just untested), fix the
    real gap before writing the test around it** (see "mock model became template-aware").
-7. **If the acceptance criteria describe frontend-observable behavior, wire the frontend even
+8. **If the acceptance criteria describe frontend-observable behavior, wire the frontend even
    without a listed frontend test path** (see "draft persistence" — verified with a real browser
    page reload, not just API tests).
-8. **If your own sprint-contract's verification plan claims a test file covers something, make
+9. **If your own sprint-contract's verification plan claims a test file covers something, make
    sure it actually does** — the `audit.trail` sprint claimed date-range filtering was tested when
    only the `action` filter was. The evaluator caught it by checking the claim against the file,
    not just running the suite. Cross-check your own claims the same way before calling a sprint done.
@@ -31,32 +37,31 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 
 - **Tier 0** (core loop): 15/17 passing, 2 `blocked` on real AWS account access. Independently
   evaluated PASS.
-- **Tier 1: COMPLETE — 16/16 passing.** Every item independently evaluated PASS or an accepted
-  CONDITIONAL, and every CONDITIONAL was closed same-session before being marked done. No
-  outstanding debt.
-- **Tier 2: COMPLETE — 4/4 passing.** `pioneer.version_diff` done (entirely frontend, hand-rolled
-  LCS diff in `apps/web/src/features/note/diff.ts`, `VersionDiff.tsx`, compare dropdowns in
-  `EncounterWorkspacePage`). Independently evaluated 7/7 PASS, including the evaluator writing its
-  own adversarial test cases against the diff algorithm (not just trusting the existing suite).
-  `pioneer.red_flags` done (`libs/ai/src/red-flags.ts` — 11 deterministic regex patterns, no LLM
-  call; `GET /encounters/:id/red-flags`, tenant-scoped; advisory banner in
-  `EncounterWorkspacePage`, Generate button never gated on flags). Independently evaluated
-  CONDITIONAL — 2 required + 2 non-blocking pattern gaps found, **all 4 fixed same session** (see
-  "Known gaps" below for the one thing the evaluator found that was NOT fixed this sprint).
-  `pioneer.writing_style` done (`libs/ai/src/writing-style.ts` — `inferWritingStyle`, a
-  deterministic "patient"→"pt" abbreviation-preference detector learned from a provider's own
-  saved `note_versions`; applied server-side in `MockModelClient` via `applyWritingStyle`).
-  Independently evaluated CONDITIONAL — no required fixes (mechanism was correct pre-pass), 2
-  non-blocking recommendations, **both closed same session**.
-  `pioneer.bulk_pdf` done (`GET /patients/:patientId/export` — `pdfkit`-rendered, tenant-scoped
-  like every other encounter route, audit-logged). Independently evaluated CONDITIONAL — 2
-  required fixes (a non-Latin-1 patient name crashed the export; an audit-ordering concern that
-  was investigated, found to be an unfixable race if taken literally, and resolved by documenting
-  the audit-at-generation-success semantic instead), **both closed same session**, plus all 3
-  non-blocking recommendations.
-  Per `docs/PRODUCT.md`: Tier 2 was only ever "one or two, done well," not a checklist — all four
-  were completed anyway per an explicit "continue to finish everything" instruction from the user
-  this session.
+- **Tier 1: COMPLETE — 17/17 passing.** `admin.shell_route` (new this session) is the 17th item —
+  see below. Every item independently evaluated PASS or an accepted CONDITIONAL, and every
+  CONDITIONAL was closed same-session before being marked done. No outstanding debt.
+- **Tier 2: COMPLETE — 4/4 passing.** `pioneer.version_diff`, `pioneer.red_flags`,
+  `pioneer.writing_style`, `pioneer.bulk_pdf` — all independently evaluated PASS or CONDITIONAL
+  with every required/cheap-non-blocking item closed same session. Per `docs/PRODUCT.md`, Tier 2
+  was only ever "one or two, done well," not a checklist — all four were completed anyway per an
+  explicit prior "continue to finish everything" instruction from the user.
+- **`admin.shell_route` done this session** (`apps/web/src/features/admin/AdminRoute.tsx`,
+  `AdminShell.tsx`) — a `/admin` route gated to the admin role. `AdminRoute` mirrors the existing
+  `ProtectedRoute` pattern in `App.tsx`: unauthenticated → redirect `/login`, non-admin →
+  redirect `/encounters`. `AdminShell` is a nav/layout shell (dark-treated header, distinct from
+  the provider workspace) with a static placeholder nav (Encounters/Roster/Templates/Audit Log) —
+  it's the attachment point for those already-backend-complete admin features, but wiring real
+  pages into the nav was explicitly out of scope this sprint. Backend `AdminController` already
+  enforced `RolesGuard`/`@Roles("admin")` on the whole `/admin/*` surface — no backend change
+  needed, only a new dedicated `apps/api/test/admin-guard.e2e-spec.ts` (401 unauthenticated / 403
+  non-admin / 200 admin) naming that behavior explicitly, since the feature named that test path.
+  Independently evaluated **PASS**, zero required fixes; two non-blocking recommendations both
+  closed same session (distinct header styling; sprint-contract boxes checked off with evidence).
+- **Docs-vs-code drift reconciled this session (2026-08-17):** `feature-list.json`/`AGENTS.md` had
+  reverted in the uncommitted working tree to a stale pre-Tier-1/2-complete draft. Restored every
+  status HEAD already had as `passing`, and restored the TENANT-ISOLATION clarification paragraph
+  — see item 4 above. Kept the new `admin.shell_route` entry and the new `BUILD-CHECKLIST.md`
+  (both genuinely new, intentional additions, not part of the drift).
 - **TENANT-ISOLATION clarified** (2026-08-17): `AGENTS.md` §2 states a patient's clinical history
   CAN cross providers (continuity of care); direct access to another provider's *encounter
   record* stays 403. Settled.
@@ -84,17 +89,14 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   substitution ("Patient"/"patient" → "Pt"/"pt") across all four SOAP sections — no-op unless the
   profile says "pt", so a provider with no/thin history sees byte-identical output to before this
   feature existed. No frontend surface (not required by acceptance).
-- **Bulk PDF export exists**: `GET /patients/:patientId/export` (new `PatientsController`/
+- **Bulk PDF export exists**: `GET /patients/:patientId/export` (`PatientsController`/
   `PatientsService`/`PdfExportService` in `apps/api/src/patients/`) renders every encounter a
   requesting provider owns for a patient (or every provider's, for an admin) as one PDF via
   `pdfkit`. Tenant-isolation selection (`selectEncountersForExport`) is a pure function, unit-
   tested separately from rendering. 403 (not 404) if the patient exists but the requester owns
   none of their encounters. Audits once per export (`patient.bulk_pdf_export`, `metadata:
-  {encounterCount}`, no PHI) — logged right after `pdfExport.render()` succeeds, deliberately NOT
-  after `res.send()` (that reorder was tried and found to be a genuine unfixable race — see
-  `patients.service.ts`'s comment). Filenames are ASCII-sanitized (`safeFilenameSegment` in
-  `patients.controller.ts`) so a non-Latin-1 patient name can't crash the response — the PDF body
-  text itself still shows the real name correctly.
+  {encounterCount}`, no PHI). Filenames are ASCII-sanitized (`safeFilenameSegment` in
+  `patients.controller.ts`) so a non-Latin-1 patient name can't crash the response.
 
 ## Environment (must-know before touching anything)
 
@@ -113,7 +115,8 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
 - To start Postgres: `docker compose -f infra/docker-compose.yml up -d`, then
   `pnpm --filter api run db:migrate && pnpm --filter api run db:seed && pnpm --filter api run icd10:embed`.
 - Full check: `pnpm run verify` — exits 0 as of this session. `pnpm --filter api run test:e2e` runs
-  96 tests; `pnpm --filter web run test` runs 30; `pnpm --filter @scribe/ai run test` runs 33.
+  99 tests (29 suites); `pnpm --filter web run test` runs 33 (8 files); `pnpm --filter @scribe/ai
+  run test` runs 33.
 - Demo logins: `dr.chen@clinic.dev` / `provider-pass-1` (+ 2 more), `admin@clinic.dev` /
   `admin-pass-1`. Dev DB accumulates throwaway `test-<uuid>@example.dev` accounts from e2e runs
   (400+ by now) — harmless, or wipe with `docker compose -f infra/docker-compose.yml down -v` +
@@ -128,11 +131,14 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   `GET /icd10/search`), templates (`GET` open to any authenticated user;
   `POST`/`PATCH`/`DELETE /:id` admin-only, each logging audit), admin (`GET /admin/encounters`
   filterable, `GET`/`POST /admin/providers`, `PATCH /admin/providers/:id/deactivate` — both
-  logging audit — `GET /admin/audit-logs` filterable by actor/action/date-range).
+  logging audit — `GET /admin/audit-logs` filterable by actor/action/date-range, `GET /admin/ping`
+  role-check probe), patients (`GET /patients/:id/export` bulk PDF).
 - **apps/web** (Vite/React, plain CSS): login, encounter list/create, workspace page (transcript
   input → streaming generation → inline edit → ICD-10 search-and-append widget → draft
-  autosave/restore → save → version history). No admin frontend (every admin.*/audit.trail
-  acceptance test is backend-only, confirmed via contract before building).
+  autosave/restore → save → version history), and now `/admin` — a role-gated shell
+  (`features/admin/AdminRoute.tsx` + `AdminShell.tsx`) with a placeholder nav; no admin *pages*
+  wired in yet (view-all/roster/templates-CRUD remain backend-only, matching their own acceptance
+  criteria).
 - **libs/shared-types**: zod schemas = the single contract, imported by both apps.
 - **libs/ai**: `ModelClient`/`EmbeddingClient` interfaces, `MockModelClient` (deterministic, calls
   `patientHistoryTool`/`icd10CandidateTool`, template-aware via `templateApplied`), best-effort
@@ -140,62 +146,57 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   hash-bag-of-words cosine approximation — known, accepted limitation, don't "fix" it.
 - **infra/**: `docker-compose.yml` (local pg+pgvector, NOT real RDS), `nginx.conf` (written, not
   deployed), `DEPLOY.md` (manual AWS steps, not yet executed).
-- **pdfkit** (`apps/api` dependency, added this session): MIT-licensed, pure-JS PDF rendering, no
-  native/headless-browser dependency — used only by `PdfExportService`. Not used anywhere else.
+- **pdfkit** (`apps/api` dependency): MIT-licensed, pure-JS PDF rendering — used only by
+  `PdfExportService`.
 - **docs/erd.md**: full schema ERD + table-by-table rationale.
+- **BUILD-CHECKLIST.md** (new this session): phased day-by-day build sequence mirroring
+  `feature-list.json`'s tiers; boxes checked to match reality as of this session.
 
 ## Known gaps / things NOT done
 
 - No real AWS deployment (`infra.rds_postgres_private`, `infra.ec2_nginx_tls` blocked — needs a
   human with account access; everything code/config-side is ready in `infra/DEPLOY.md`).
 - No Playwright web e2e — only Vitest component tests for the web app.
-- No admin frontend UI (backend-only, by design — no acceptance test requires it).
-- Tier 2 (pioneer) is fully complete — all four items (`version_diff`, `red_flags`,
-  `writing_style`, `bulk_pdf`) done. Nothing left in this tier.
+- No admin frontend *pages* beyond the shell — `admin.view_all`/`roster`/`templates_crud`/
+  `template_select`/`template_live_update` are all `passing` on their own backend-only acceptance
+  criteria (no frontend test path listed for any of them), but nothing in the new `/admin` nav
+  links to them yet. Not required by any current acceptance test; would be natural follow-on scope
+  if the user wants a fuller admin UI.
 - `pioneer.writing_style`'s style window can go "sticky" for long-lived provider accounts (an
   older majority of saved notes can dilute a real, recent preference shift) — a conscious,
-  undecided product question flagged by the evaluator, not a bug. Worth a decision if this ever
-  becomes real product scope beyond the mock model.
+  undecided product question flagged by a prior evaluator, not a bug.
 - No rate limiting / no CSRF concern beyond JWT bearer auth (SPA + bearer token, no cookies).
 - **Cross-cycle transcript-autosave race (found by the `red_flags` evaluator, NOT fixed yet)**:
   in `EncounterWorkspacePage.onTranscriptChange`, under elevated network latency an older
   `updateInput` PATCH can resolve *after* a newer one, leaving RDS with a stale transcript — which
   then also stales the red-flags banner and the Subjective section of the next generated note.
-  This is a pre-existing Tier 0/1 bug (this sprint's own fix — awaiting `updateInput` before
-  re-scanning flags within one cycle — is correct and doesn't cause it). Needs its own
+  This is a pre-existing Tier 0/1 bug, not introduced by any pioneer/admin sprint. Needs its own
   sprint-contract before being touched; likely fix shape is a monotonic request-sequence guard
   (ignore a PATCH/GET response if a newer request for the same encounter has already started),
   not a debounce-interval change.
 
 ## Next feature to work
 
-**Nothing is required.** Tier 0 (15/17, 2 blocked on real AWS access), Tier 1 (16/16), and Tier 2
-(4/4) are all complete — every non-blocked item in `feature-list.json` is `passing`. The "continue
-to finish everything" instruction that drove this session's Tier 2 work is now fully satisfied.
+**Nothing is required.** Tier 0 (15/17, 2 blocked on real AWS access), Tier 1 (17/17), and Tier 2
+(4/4) are all complete — every non-blocked item in `feature-list.json` is `passing`.
 
 What's left, in priority order if the user wants to keep going:
-1. **The tracked cross-cycle autosave race** (see "Known gaps" above, found by the `red_flags`
-   evaluator two sprints ago, still untouched) — a real, confirmed bug in core Tier 0/1 save-path
-   logic (`EncounterWorkspacePage`'s transcript-autosave debounce), not Tier 2 scope. This is the
-   most concrete, well-understood next unit of work if the user wants a bug fixed rather than a
-   new feature. Needs its own `sprint-contract.md` since it touches core generation-input
-   correctness, not a pioneer add-on.
-2. **`infra.rds_postgres_private` / `infra.ec2_nginx_tls`** — the only remaining `blocked` items.
-   Everything code/config-side is ready (`infra/DEPLOY.md`, `nginx.conf`, migrations); only real
-   AWS account provisioning is outstanding, which requires the user to provide credentials/access.
-3. Nothing else in `feature-list.json` is `failing` — a fresh session should not invent new scope
-   without the user asking for it first (see AGENTS.md §5: "Prioritization is graded — an
-   incomplete build that feels finished beats a complete build with sloppy infra," and Tier 2 was
-   already explicitly optional per `docs/PRODUCT.md`).
+1. **The tracked cross-cycle autosave race** (see "Known gaps" above) — a real, confirmed bug in
+   core Tier 0/1 save-path logic, not new-feature scope. Needs its own `sprint-contract.md`.
+2. **Wiring the `/admin` shell's nav to real pages** (view-all/roster/templates-CRUD) — currently
+   backend-complete but frontend-inert placeholder links. Not required by any acceptance test, but
+   would make the admin surface demoable end-to-end in the walkthrough rather than curl-only.
+3. **`infra.rds_postgres_private` / `infra.ec2_nginx_tls`** — the only remaining `blocked` items.
+   Everything code/config-side is ready; only real AWS account provisioning is outstanding, which
+   requires the user to provide credentials/access.
+4. Nothing else in `feature-list.json` is `failing` — a fresh session should not invent new scope
+   without the user asking for it first.
 
-**If picking up (1) or anything new:** overwrite `sprint-contract.md`'s Active sprint section
-fresh before writing code. **After the code is green:** launch a fresh evaluator subagent (repo
-path, branch name, an unused scratch port, explicit instruction to reproduce claims live rather
-than trust them, told to actually run the app rather than just read tests). **If it flags
-anything, even non-blocking, close what's cheap to close same-session** — this pattern held
-across all four Tier 2 sprints this session: `version_diff` (clean 7/7 PASS, nothing to close),
-`red_flags` (CONDITIONAL, 2 required + 2 non-blocking closed), `writing_style` (CONDITIONAL, 0
-required + 2 non-blocking closed), `bulk_pdf` (CONDITIONAL, 2 required + 3 non-blocking closed,
-including a required fix where the "obvious" literal resolution was tried, found to introduce a
-worse problem — a genuine race — and reverted in favor of the evaluator's own offered alternative
-of documenting the design decision instead of chasing an unachievable guarantee).
+**Before picking up anything new:** re-run the sanity check from item 4 at the top of this file —
+diff the working-tree `feature-list.json`/`AGENTS.md` against `git show HEAD:<file>` before
+trusting either as-is, since this session found real drift there. **If picking up (1) or anything
+new:** overwrite `sprint-contract.md`'s Active sprint section fresh before writing code. **After
+the code is green:** launch a fresh evaluator subagent (repo path, branch name, an unused scratch
+port, explicit instruction to reproduce claims live rather than trust them, told to actually run
+the app rather than just read tests). **If it flags anything, even non-blocking, close what's
+cheap to close same-session** — this pattern has held across every sprint this project has run.
