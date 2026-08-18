@@ -46,17 +46,112 @@ opened (not merged — see devops/session-handoff.md for the URL). Next action i
 not more Terraform work — re-run this same sprint once `devops-agent` has the needed
 permissions.
 
+## Sprint outcome — devops.terraform_oidc_github (2026-08-18) — BLOCKED, not passing
+
+Terraform applied cleanly on the first `terraform apply` (`3 added, 0 changed, 0 destroyed`) —
+`aws_iam_openid_connect_provider.github_actions`, `aws_iam_role.github_actions_deploy`,
+`aws_iam_role_policy.github_actions_deploy_permissions` all real and live. Confirmed via
+`aws iam get-open-id-connect-provider` (issuer + thumbprint) and `aws iam get-role` (trust
+policy scoped to `repo:nimatrazmjo/harness-lab:ref:refs/heads/main` +
+`repo:nimatrazmjo/harness-lab:pull_request` — NOT `repo:*`). 2 of 3 minimum verify proofs done
+for real. Blocked on:
+1. `aws iam simulate-principal-policy` — real `AccessDenied` for `devops-agent` on
+   `iam:SimulatePrincipalPolicy` itself (not a create/manage action, wasn't in the existing
+   grant). Exact fix documented in `devops/manual.md` Step 8.
+2. The committed `.github/workflows/oidc-smoke-test.yml` (PR #9, branch
+   `feat/devops-terraform-oidc-github`) doesn't execute yet — GitHub doesn't dispatch/trigger
+   `pull_request`/`workflow_dispatch` workflows for a file that only exists on a non-default
+   branch. Self-resolves on merge; not an IAM issue, no grant needed.
+
+Left `status: blocked` in `devops/feature-list.json` with the precise reason, per
+`devops/manual.md`/`devops/AGENTS.md`'s "don't fake passing" rule. PR #9 open, not merged.
+Full detail: `devops/progress.md` 2026-08-18 entry, `devops/manual.md` Step 8 + Log.
+
 ## Active sprint
 
-**Feature(s):** _none — `devops.terraform_backend` is `blocked` on an IAM permissions grant
-(see above), not resumable by an agent alone. `devops.terraform_oidc_github` /
-`devops.terraform_ecr` both `dependsOn` it and shouldn't start until it's actually `passing`.
-Next `/devops` session should first check whether the IAM fix landed; if not, there is no
-unblocked Tier 0 item left to work — flag that back to the user rather than jumping to Tier 1._
+**Feature(s):** _none — `devops.terraform_oidc_github` is `blocked` on an IAM permissions
+grant (see above), not resumable by an agent alone. `devops.terraform_ecr` `dependsOn` it and
+shouldn't start until it's actually `passing`. Next `/devops` session should first check
+whether Step 8's IAM grant landed and/or PR #9 merged (which would unstick the smoke-test
+workflow too); if neither, there is no unblocked Tier 0 item left to work — flag that back to
+the user rather than jumping to Tier 1._
 
 **Goal (one sentence):** _—_
 
 **Tier:** _—_ · **Branch:** _—_
+
+---
+
+## Superseded draft — was filled in before the IAM/platform blockers were hit (kept for the
+concrete approach and Done-condition checklist, still valid once Step 8's grant lands and/or
+PR #9 merges)
+
+**Goal (one sentence):** Create an IAM OIDC identity provider trusting
+`token.actions.githubusercontent.com` + an IAM role GitHub Actions assumes via
+`aws-actions/configure-aws-credentials`, trust-scoped to `repo:nimatrazmjo/harness-lab:*`
+(not org-wide) with ref conditions limited to `main` and `pull_request`, and a least-privilege
+permissions policy (ECR push to `scribe-api`/`scribe-web` only, `ssm:SendCommand` scoped to
+deploy-tagged instances, ECS/EC2 describe for smoke checks) — zero static AWS keys anywhere.
+
+**Tier:** 0 · **Branch:** `feat/devops-terraform-oidc-github`
+
+### Context
+
+`devops.terraform_ecr` also `dependsOn` this feature but is explicitly OUT of scope this
+sprint — do not touch ECR repo resources, only reference the two repo names in the OIDC role's
+ECR policy statement as placeholders for the repos `terraform_ecr` will create later.
+
+### Explicitly OUT of scope this sprint
+
+- `devops.terraform_ecr` — separate feature, not authorized here.
+- Any resource under `apps/api/src/**`, `apps/web/src/**`, `libs/**` — permanent no-touch zone.
+- A full CD pipeline workflow (push-on-main, deploy) — Tier 2, not this sprint.
+
+### Done conditions (copied verbatim from `devops/feature-list.json` acceptance)
+
+- [ ] No AWS access key / secret key exists anywhere in GitHub secrets or the codebase — auth
+      is 100% OIDC.
+- [ ] Trust policy's `token.actions.githubusercontent.com:sub` condition is scoped to
+      `repo:nimatrazmjo/harness-lab:*` (not `repo:*`), with ref conditions limited to `main`
+      and `pull_request` events.
+- [ ] Role policy denies anything outside {ECR push to `scribe-api`/`scribe-web`,
+      `ssm:SendCommand` to deploy-tagged instances, ECS/EC2 describe for smoke checks} — no
+      `*` resource on a mutating action.
+
+### Verification plan (real commands, run for real against AWS)
+
+- [ ] `terraform plan` / `terraform apply` in `infra/terraform/` (local apply, human-authorized
+      exception for this Tier 0 bootstrap phase per `devops/manual.md` precedent — document in
+      `devops/progress.md`).
+- [ ] `aws iam get-open-id-connect-provider --open-id-connect-provider-arn <arn>` — confirm
+      issuer `token.actions.githubusercontent.com`, thumbprint present, client-id-list includes
+      `sts.amazonaws.com`.
+- [ ] `aws iam get-role --role-name scribe-github-actions-deploy` — inspect
+      `AssumeRolePolicyDocument`, confirm `sub` condition is `repo:nimatrazmjo/harness-lab:*`
+      (via `StringLike`), not `repo:*`.
+- [ ] `aws iam simulate-principal-policy --policy-source-arn <role-arn> --action-names
+      ecr:PutImage --resource-arns 'arn:aws:ecr:*:*:repository/unrelated-repo'` — expect
+      `implicitDeny`.
+- [ ] `aws iam simulate-principal-policy` for `ecr:PutImage` against
+      `arn:aws:ecr:*:*:repository/scribe-api` — expect `allowed`.
+- [ ] A minimal `oidc-smoke-test.yml` GitHub Actions workflow that assumes the role via OIDC
+      and runs `aws sts get-caller-identity` with no `AWS_ACCESS_KEY_ID` set — gold-standard
+      proof if time/scope allow; otherwise the `simulate-principal-policy` + `get-role` +
+      `get-open-id-connect-provider` triad is the accepted direct-verification substitute.
+
+### Invariants that must still hold
+
+- [ ] No static AWS credentials introduced anywhere (workflow files, GitHub secrets, code).
+- [ ] No-touch zone respected (`git diff` confirms nothing under `apps/*/src` or `libs/**`).
+- [ ] Local `terraform apply` (if needed) logged in `devops/progress.md` with justification.
+- [ ] Least privilege only — no wildcard resource on a mutating IAM statement.
+
+### Definition of done
+
+- [ ] Every Done condition checked with real evidence.
+- [ ] Every verify command actually run, output recorded.
+- [ ] `devops/feature-list.json` → `passing` (or left `blocked` with exact reason, no faking).
+- [ ] `devops/progress.md` + `devops/session-handoff.md` + this file updated in the same commit.
 
 ---
 

@@ -15,17 +15,63 @@ purpose, so a product-coding session never has to load infra history into contex
 ## Current state
 
 `devops.dockerfile_api`, `devops.dockerfile_web`, and `devops.terraform_backend` are all
-`passing` and merged/committed to `main`. The remote state backend
-(`scribe-terraform-state-404063516240` S3 bucket + `scribe-terraform-locks` DynamoDB table) is
-real, provisioned, and verified — versioning/SSE/public-access-block all confirmed live,
-locking confirmed by an actual concurrent-apply test. `infra/terraform/` now has a real,
-non-empty remote state object (`scribe/terraform.tfstate`) after a zero-resource `apply` to
-initialize it. `devops.terraform_oidc_github` and `devops.terraform_ecr` are unblocked next
-(both `dependsOn` this feature, now satisfied) — need their own IAM grants for `devops-agent`
-first (see `devops/manual.md`). The two AWS-account-blocked items (`terraform_networking_rds`,
-`terraform_compute_envs`) are unaffected/unchanged.
+`passing` and merged/committed to `main`. `devops.terraform_oidc_github` is **`blocked`**
+(2026-08-18, this session) — the OIDC provider + IAM role are real, applied, and correctly
+trust-scoped, but the feature's required verification proof isn't fully runnable yet (see
+below). `devops.terraform_ecr` remains unstarted, `dependsOn` this feature. The two
+AWS-account-blocked items (`terraform_networking_rds`, `terraform_compute_envs`) are
+unaffected/unchanged.
 
 ## Log
+
+### 2026-08-18 — devops.terraform_oidc_github: blocked (infra applied, verify proof incomplete)
+
+`terraform apply` in `infra/terraform/` (`AWS_PROFILE=devops-agent`) succeeded on the **first
+try** — `3 added, 0 changed, 0 destroyed`: `aws_iam_openid_connect_provider.github_actions`,
+`aws_iam_role.github_actions_deploy`, `aws_iam_role_policy.github_actions_deploy_permissions`.
+No new IAM grant was needed for creation — the `scribe-devops-bootstrap` policy's
+`OidcProviderManage`/`GithubActionsRoleManage` statements (from `devops.terraform_backend`'s
+Step 1) already covered it. Local apply authorized per `devops/manual.md`'s established
+Tier-0-bootstrap exception, same as `devops.terraform_backend`.
+
+Fixed a real bug while writing the config: a hand-typed OIDC thumbprint was 39 hex chars (an
+invalid SHA1 length — should be 40) — replaced with the Terraform-recommended pattern of
+fetching it dynamically via `data.tls_certificate`, which avoids hardcoding entirely.
+
+Verified for real against AWS:
+- `aws iam get-open-id-connect-provider` — issuer `token.actions.githubusercontent.com`,
+  `client_id_list` includes `sts.amazonaws.com`, thumbprint populated. ✓
+- `aws iam get-role --role-name scribe-github-actions-deploy` — trust policy's `sub` condition
+  (`StringLike`) is exactly `["repo:nimatrazmjo/harness-lab:ref:refs/heads/main",
+  "repo:nimatrazmjo/harness-lab:pull_request"]` — scoped to this repo only, not `repo:*`,
+  ref-limited to main + PR events as required. ✓
+
+Blocked on the third required proof:
+- `aws iam simulate-principal-policy --policy-source-arn <role-arn> --action-names ecr:PutImage
+  --resource-arns 'arn:aws:ecr:*:*:repository/unrelated-repo'` → real `AccessDenied`:
+  `devops-agent` is not authorized to perform `iam:SimulatePrincipalPolicy` on
+  `arn:aws:iam::404063516240:role/scribe-github-actions-deploy` — this action itself was never
+  granted (it's a verification/testing action, distinct from the create/manage actions Step 1
+  covered). Exact minimal fix documented as `devops/manual.md` Step 8.
+
+Also wrote `.github/workflows/oidc-smoke-test.yml` (assumes the role via OIDC, asserts no
+`AWS_ACCESS_KEY_ID` is set, asserts `ecr:GetAuthorizationToken`/`ssm:DescribeInstanceInformation`
+succeed, asserts `ecr:DescribeRepositories` on an out-of-scope repo and `iam:ListUsers` both get
+real `AccessDenied`) as the gold-standard proof path. It does not execute yet: opening PR #9
+(same-repo PR, branch → main) did not trigger a `pull_request` run
+(`gh api .../actions/runs?event=pull_request` → `total_count: 0`), and
+`gh workflow run oidc-smoke-test.yml --ref feat/devops-terraform-oidc-github` was rejected
+(`Workflow does not have 'workflow_dispatch' trigger`) even though the file on that branch has
+both triggers. This is a known GitHub Actions platform behavior — `pull_request`/
+`workflow_dispatch` triggers aren't registered/dispatchable for a workflow file until it exists
+on the default branch. Confirmed this isn't a repo-settings issue via `gh api
+repos/.../actions/permissions` (Actions enabled, `allowed_actions: all`). Will self-resolve on
+merge — documented in `devops/manual.md` so it isn't re-diagnosed from scratch.
+
+Left `status: blocked` (not faked `passing`) in `devops/feature-list.json` with the precise
+reason. PR #9 opened on `feat/devops-terraform-oidc-github`, **not merged** — per this
+workstream's explicit rule against agents merging their own PRs.
+
 
 ### 2026-08-18 — devops.terraform_backend: passing (real AWS, fully verified)
 

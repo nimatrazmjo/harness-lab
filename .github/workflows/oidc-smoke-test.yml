@@ -1,0 +1,86 @@
+name: OIDC Smoke Test
+
+# Proves devops.terraform_oidc_github end-to-end against real AWS:
+#   1. GitHub Actions authenticates via OIDC only — no AWS_ACCESS_KEY_ID/SECRET anywhere.
+#   2. sts:GetCallerIdentity confirms the exact expected role ARN was assumed.
+#   3. An in-scope action (ecr:GetAuthorizationToken, ssm read-only) succeeds.
+#   4. Out-of-scope actions (ECR on a repo outside {scribe-api,scribe-web}, any iam:* call)
+#      are denied for real by AWS, not just simulated.
+#
+# Triggers on pull_request (so opening/updating a PR against main exercises the OIDC trust
+# policy's `repo:nimatrazmjo/harness-lab:pull_request` condition) and workflow_dispatch for
+# manual re-runs from main (matches the `ref:refs/heads/main` trust condition — dispatching
+# from any other branch is expected to fail role assumption, which is itself proof the trust
+# scoping is tight).
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  verify-oidc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assume scribe-github-actions-deploy via OIDC (no static keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::404063516240:role/scribe-github-actions-deploy
+          aws-region: us-east-1
+
+      - name: Confirm no static credentials + correct identity
+        run: |
+          set -euo pipefail
+          if [ -n "${AWS_ACCESS_KEY_ID:-}" ]; then
+            echo "FAIL: a static AWS_ACCESS_KEY_ID is set in this job — OIDC-only is required" >&2
+            exit 1
+          fi
+          echo "OK: no static AWS_ACCESS_KEY_ID present"
+          aws sts get-caller-identity
+
+      - name: In-scope action succeeds (ecr:GetAuthorizationToken)
+        run: aws ecr get-authorization-token --region us-east-1 >/dev/null && echo "OK: ecr:GetAuthorizationToken allowed"
+
+      - name: In-scope action succeeds (ssm read-only, resource *)
+        run: aws ssm describe-instance-information --region us-east-1 >/dev/null && echo "OK: ssm:DescribeInstanceInformation allowed"
+
+      - name: Out-of-scope ECR repo is denied
+        run: |
+          set +e
+          aws ecr describe-repositories --repository-names unrelated-repo --region us-east-1 2>err.log
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "FAIL: expected AccessDenied on an ECR repo outside {scribe-api,scribe-web}" >&2
+            cat err.log
+            exit 1
+          fi
+          if grep -qi 'AccessDenied\|not authorized' err.log; then
+            echo "OK: out-of-scope ECR repo denied as expected"
+          else
+            echo "FAIL: call failed but not with AccessDenied — check err.log" >&2
+            cat err.log
+            exit 1
+          fi
+
+      - name: Out-of-scope service is denied (iam:ListUsers)
+        run: |
+          set +e
+          aws iam list-users 2>err2.log
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "FAIL: expected AccessDenied on iam:ListUsers — role must not have IAM permissions" >&2
+            cat err2.log
+            exit 1
+          fi
+          if grep -qi 'AccessDenied\|not authorized' err2.log; then
+            echo "OK: out-of-scope iam:ListUsers denied as expected"
+          else
+            echo "FAIL: call failed but not with AccessDenied — check err2.log" >&2
+            cat err2.log
+            exit 1
+          fi
