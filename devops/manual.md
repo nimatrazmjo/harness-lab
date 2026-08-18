@@ -401,6 +401,60 @@ Once granted, re-run `terraform apply` in `infra/terraform/` for `devops.terrafo
 full verify sequence (`describe-repositories` for `IMMUTABLE`, the double-push smoke test,
 `get-lifecycle-policy`).
 
+**UPDATE after Step 9's grant landed:** `terraform apply` succeeded creating both
+`aws_ecr_repository` resources (`scribe-api`, `scribe-web` — both confirmed `IMMUTABLE` via
+`aws ecr describe-repositories`), but hit the exact same "create granted, read-back not"
+pattern seen in `devops.terraform_backend`: the `aws_ecr_lifecycle_policy` resources (a
+*separate* resource type from the repos, applying the untagged-image expiry rule) errored on
+their post-create read:
+
+```
+Error: reading ECR Lifecycle Policy (scribe-web): operation error ECR: GetLifecyclePolicy, ...
+AccessDeniedException: User: .../devops-agent is not authorized to perform:
+ecr:GetLifecyclePolicy on resource: arn:aws:ecr:us-east-1:404063516240:repository/scribe-web
+because no identity-based policy allows the ecr:GetLifecyclePolicy action
+```
+
+This **tainted** both lifecycle-policy resources (same false-positive as before — the
+underlying policy write succeeded, only the read-back failed). No `prevent_destroy` guard was
+needed here since ECR lifecycle policies aren't the kind of resource where an accidental
+destroy+recreate loses data, but ran `terraform untaint` on both anyway to avoid an unnecessary
+delete+recreate cycle on next apply.
+
+## Step 10 — Round 6: `ecr:GetLifecyclePolicy` for `devops.terraform_ecr`
+
+Add `ecr:GetLifecyclePolicy` (and `ecr:DeleteLifecyclePolicy` for completeness, so removing the
+policy later doesn't trigger another round) to the same `EcrRepos` statement, same resource
+scope. This is round 2 of grants on `scribe-devops-infra` (Step 9 was round 1) — bump to v3:
+
+```bash
+cat > scribe-devops-infra-policy-v3.json <<'EOF'
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {"Sid": "NetworkingCompute", "Effect": "Allow", "Action": ["ec2:Describe*","ec2:CreateVpc","ec2:DeleteVpc","ec2:ModifyVpcAttribute","ec2:CreateSubnet","ec2:DeleteSubnet","ec2:CreateSecurityGroup","ec2:DeleteSecurityGroup","ec2:AuthorizeSecurityGroupIngress","ec2:AuthorizeSecurityGroupEgress","ec2:RevokeSecurityGroupIngress","ec2:RevokeSecurityGroupEgress","ec2:CreateRouteTable","ec2:DeleteRouteTable","ec2:CreateRoute","ec2:DeleteRoute","ec2:AssociateRouteTable","ec2:DisassociateRouteTable","ec2:CreateInternetGateway","ec2:DeleteInternetGateway","ec2:AttachInternetGateway","ec2:DetachInternetGateway","ec2:RunInstances","ec2:TerminateInstances","ec2:ModifyInstanceAttribute","ec2:CreateTags","ec2:DeleteTags"], "Resource": "*"},
+        {"Sid": "RdsDatabase", "Effect": "Allow", "Action": ["rds:CreateDBInstance","rds:DeleteDBInstance","rds:ModifyDBInstance","rds:DescribeDBInstances","rds:CreateDBSubnetGroup","rds:DeleteDBSubnetGroup","rds:DescribeDBSubnetGroups","rds:AddTagsToResource","rds:ListTagsForResource"], "Resource": "*"},
+        {"Sid": "EcrRepos", "Effect": "Allow", "Action": ["ecr:CreateRepository","ecr:DeleteRepository","ecr:DescribeRepositories","ecr:PutImageTagMutability","ecr:PutLifecyclePolicy","ecr:GetLifecyclePolicy","ecr:DeleteLifecyclePolicy","ecr:PutImageScanningConfiguration","ecr:TagResource","ecr:UntagResource","ecr:ListTagsForResource","ecr:BatchCheckLayerAvailability","ecr:PutImage","ecr:InitiateLayerUpload","ecr:UploadLayerPart","ecr:CompleteLayerUpload","ecr:BatchGetImage","ecr:DescribeImages","ecr:ListImages"], "Resource": "arn:aws:ecr:*:*:repository/scribe-*"},
+        {"Sid": "EcrAuth", "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*"},
+        {"Sid": "SsmDeploy", "Effect": "Allow", "Action": ["ssm:SendCommand","ssm:GetCommandInvocation","ssm:ListCommandInvocations","ssm:DescribeInstanceInformation"], "Resource": "*", "Condition": {"StringEquals": {"ssm:resourceTag/deploy": "true"}}},
+        {"Sid": "IamInstanceProfileMgmt", "Effect": "Allow", "Action": ["iam:CreateInstanceProfile","iam:DeleteInstanceProfile","iam:AddRoleToInstanceProfile","iam:RemoveRoleFromInstanceProfile","iam:GetInstanceProfile"], "Resource": "arn:aws:iam::404063516240:instance-profile/scribe-*"}
+    ]
+}
+EOF
+
+aws iam create-policy-version \
+  --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-infra \
+  --policy-document file://scribe-devops-infra-policy-v3.json \
+  --set-as-default \
+  --profile default
+```
+
+Once granted, `terraform apply` again — the repos are already live, so this should only need
+to create the lifecycle policies (already `untaint`ed, so no unnecessary replace). Then finish
+the verify sequence: `describe-repositories` for `IMMUTABLE` (already confirmed), the
+double-push smoke test (not yet run — this is the most important proof, don't skip it), and
+`get-lifecycle-policy` to confirm the 7-day untagged-expiry rule is actually live.
+
 ---
 
 ## Log

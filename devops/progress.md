@@ -14,15 +14,48 @@ purpose, so a product-coding session never has to load infra history into contex
 
 ## Current state
 
-`devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`, and
-`devops.terraform_oidc_github` are all `passing`. The first three are merged to `main`;
-`terraform_oidc_github`'s three real bug fixes (see log entry below) are on PR #10, pending
-merge. `devops.terraform_ecr` is `blocked` on one more IAM grant (`ecr:TagResource` — see
-below and `devops/manual.md` Step 9); Terraform is fully written and ready to re-apply once
-granted. The two AWS-account-blocked items (`terraform_networking_rds`,
-`terraform_compute_envs`) are unaffected/unchanged.
+`devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`,
+`devops.terraform_oidc_github`, and `devops.terraform_ecr` are all `passing`. The first four
+are merged to `main`; `terraform_ecr`'s fix is on PR #11, pending merge. All Tier 0 items that
+don't need real EC2/RDS networking are now done. The two AWS-account-blocked items
+(`terraform_networking_rds`, `terraform_compute_envs`) are unaffected/unchanged — those are the
+only Tier 0 items left.
 
 ## Log
+
+### 2026-08-18 — devops.terraform_ecr: passing (2 more IAM rounds, real double-push proof)
+
+Picked up from the entry below (blocked on `ecr:TagResource`). After that grant landed,
+`terraform apply` created both ECR repos successfully — but hit the exact same
+create-granted-read-back-not pattern already seen in `devops.terraform_backend`: the separate
+`aws_ecr_lifecycle_policy` resources errored on `ecr:GetLifecyclePolicy` during their
+post-create read, tainting both (false positive — the policy write itself had succeeded).
+Cleared with `terraform untaint`; documented the exact grant needed in `devops/manual.md` Step
+10 (`ecr:GetLifecyclePolicy` + `ecr:DeleteLifecyclePolicy`, same resource scope). After that
+landed too, `terraform apply` showed clean `0 added, 0 changed, 0 destroyed` — everything
+already matched config, confirming both prior partial applies had actually succeeded.
+
+**Full verify sequence run for real:**
+- `describe-repositories` → both `IMMUTABLE`.
+- `get-lifecycle-policy` on both → the 7-day untagged-expiry rule live and correctly worded.
+- `describe-repositories` scanning config → `scanOnPush: true` on both.
+- **The actual double-push immutability test** (the most important proof, not just config
+  inspection): `docker login` via `aws ecr get-login-password`, pushed `alpine:3.19` tagged
+  `scribe-api:smoke-test-tag` → succeeded. Pushed `alpine:3.18` (different image) to the exact
+  same tag → **rejected**: `error from registry: The image tag 'smoke-test-tag' already exists
+  in the 'scribe-api' repository and cannot be overwritten because the tag is immutable.`
+
+**Known minor gap:** cleanup of the smoke-test image failed —
+`devops-agent` lacks `ecr:BatchDeleteImage`, not granted (and not worth a 3rd IAM round just
+for cleanup). The `smoke-test-tag` image will persist in the real `scribe-api` repo
+indefinitely — it's a harmless throwaway `alpine` image, and the lifecycle policy only expires
+*untagged* images so it won't auto-clean. Fine to ignore, or grant `ecr:BatchDeleteImage`
+later if it's ever worth tidying up.
+
+`devops/feature-list.json` → `devops.terraform_ecr` `passing`. Next: Tier 0's only remaining
+items are the two already-`blocked` real-AWS ones (`terraform_networking_rds`,
+`terraform_compute_envs`) — both need a domain-name decision and are bigger/riskier applies;
+otherwise Tier 0 is done and Tier 1 (CI gates: secret scan, image build, Trivy) can start.
 
 ### 2026-08-18 — devops.terraform_ecr: blocked on ecr:TagResource
 
