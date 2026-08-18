@@ -17,10 +17,51 @@ purpose, so a product-coding session never has to load infra history into contex
 `devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`, and
 `devops.terraform_oidc_github` are all `passing`. The first three are merged to `main`;
 `terraform_oidc_github`'s three real bug fixes (see log entry below) are on PR #10, pending
-merge. `devops.terraform_ecr` is next, now fully unblocked. The two AWS-account-blocked items
-(`terraform_networking_rds`, `terraform_compute_envs`) are unaffected/unchanged.
+merge. `devops.terraform_ecr` is `blocked` on one more IAM grant (`ecr:TagResource` — see
+below and `devops/manual.md` Step 9); Terraform is fully written and ready to re-apply once
+granted. The two AWS-account-blocked items (`terraform_networking_rds`,
+`terraform_compute_envs`) are unaffected/unchanged.
 
 ## Log
+
+### 2026-08-18 — devops.terraform_ecr: blocked on ecr:TagResource
+
+`infra/terraform/main.tf` got two new resource blocks: `aws_ecr_repository.scribe` (for_each
+over `scribe-api`/`scribe-web`, `image_tag_mutability = "IMMUTABLE"`,
+`image_scanning_configuration { scan_on_push = true }`) and
+`aws_ecr_lifecycle_policy.scribe_expire_untagged` (one rule per repo: expire untagged images
+`sinceImagePushed` > 7 days). `terraform init`/`plan` both ran clean against the real S3
+backend (`AWS_PROFILE=devops-agent`) — plan showed `4 to add, 0 to change, 0 to destroy`, no
+drift on the existing OIDC/role resources.
+
+`terraform apply` failed immediately, before either repository existed:
+
+```
+Error: creating ECR Repository (scribe-api): ... AccessDeniedException: User:
+arn:aws:iam::404063516240:user/devops-agent is not authorized to perform: ecr:TagResource on
+resource: arn:aws:ecr:us-east-1:404063516240:repository/scribe-api because no identity-based
+policy allows the ecr:TagResource action
+```
+
+Same error for `scribe-web`. Root cause: the provider's `default_tags` block (applied at the
+provider level, tags every resource `Project`/`ManagedBy`) means ECR's `CreateRepository` call
+bundles a tag-write, and AWS evaluates `ecr:TagResource` against that same call — a distinct
+action from `ecr:CreateRepository`, not covered by the existing `scribe-devops-infra` policy's
+`EcrRepos` statement (see `devops/manual.md` Step 1). Confirmed **no partial resources were
+created**: `aws ecr describe-repositories --repository-names scribe-api scribe-web` →
+`RepositoryNotFoundException` for both, and `terraform state list` shows no ECR resources — AWS
+rejects `CreateRepository` atomically when the bundled tag-write is denied, so nothing needed
+cleanup.
+
+Left `status: blocked` in `devops/feature-list.json`, not faked `passing` — none of the four
+`verify` commands could run for real (no repos exist yet). Exact minimal fix (add
+`ecr:TagResource`/`ecr:UntagResource`/`ecr:ListTagsForResource` to `scribe-devops-infra`'s
+`EcrRepos` statement, same `arn:aws:ecr:*:*:repository/scribe-*` resource scope) documented in
+`devops/manual.md` Step 9, following the same "capture exact denied action, don't guess broad"
+discipline as every prior grant round. Branch `feat/devops-terraform-ecr`, PR opened (not
+merged — see `devops/session-handoff.md`). Once an admin applies Step 9, re-run
+`terraform apply` then the full verify sequence, especially the double-push immutability test
+(the load-bearing proof, not just eyeballing `imageTagMutability`).
 
 ### 2026-08-18 — devops.terraform_oidc_github: passing (found + fixed 3 real bugs to get there)
 

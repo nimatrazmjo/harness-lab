@@ -110,7 +110,7 @@
             "id": "devops.terraform_ecr",
             "tier": 0,
             "title": "ECR repositories (api + web) with immutable tags",
-            "status": "failing",
+            "status": "blocked",
             "description": "Terraform-provisioned ECR repos for scribe-api and scribe-web. Tag immutability ON (a pushed tag can never be overwritten — this is what makes 'use the SHA, never latest' actually enforceable, not just a convention). Native ECR scan-on-push enabled as defense-in-depth alongside the Trivy CI gate. Lifecycle policy expires untagged images after 7 days.",
             "acceptance": [
                 "Both repos have imageTagMutability = IMMUTABLE.",
@@ -124,7 +124,7 @@
                 "docker push <account>.dkr.ecr.<region>.amazonaws.com/scribe-api:smoke-test-tag  # second push to same tag must be REJECTED"
             ],
             "dependsOn": ["devops.terraform_backend", "devops.terraform_oidc_github"],
-            "rubric": "DevOps: registry, immutable artifacts"
+            "rubric": "DevOps: registry, immutable artifacts. Blocked 2026-08-18: Terraform written (infra/terraform/main.tf, aws_ecr_repository x2 + aws_ecr_lifecycle_policy x2), terraform plan clean (4 to add, 0 to change, 0 to destroy), but terraform apply hit real AccessDenied on ecr:TagResource for both repos (existing scribe-devops-infra EcrRepos grant covers CreateRepository but not the separate TagResource action bundled into the same API call via default_tags). No partial resources created (confirmed via describe-repositories + terraform state list). Exact minimal IAM fix documented in devops/manual.md Step 9 — needs an admin to add ecr:TagResource/UntagResource/ListTagsForResource to scribe-devops-infra's EcrRepos statement."
         },
         {
             "id": "devops.terraform_networking_rds",
