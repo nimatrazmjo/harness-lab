@@ -143,13 +143,23 @@ export function EncounterWorkspacePage() {
 
   const compareFrom = history.find((v) => v.id === compareFromId);
   const compareTo = history.find((v) => v.id === compareToId);
+  const patient = encounter.patient;
+  const patientDob = patient ? new Date(`${patient.dob}T00:00:00`).toLocaleDateString() : null;
 
   return (
     <div className="workspace-shell">
-      <header className="app-header">
+      <header className="app-header workspace-header">
         <button type="button" className="link-button" onClick={() => navigate("/encounters")}>
           ← Encounters
         </button>
+        {patient && (
+          <div className="workspace-header__patient">
+            <span className="workspace-header__patient-name">
+              {patient.firstName} {patient.lastName}
+            </span>
+            <span className="workspace-header__patient-dob">DOB {patientDob}</span>
+          </div>
+        )}
         <span className={`status-pill status-pill--${encounter.status}`}>{encounter.status}</span>
       </header>
 

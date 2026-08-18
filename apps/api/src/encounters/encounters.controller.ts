@@ -11,13 +11,17 @@ import {
 import { CurrentUser, CurrentUserPayload } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { PatientsRepository } from "../patients/patients.repository";
 import { toEncounterDto } from "./encounters.mapper";
 import { EncountersService } from "./encounters.service";
 
 @Controller("encounters")
 @UseGuards(JwtAuthGuard)
 export class EncountersController {
-  constructor(private readonly encounters: EncountersService) {}
+  constructor(
+    private readonly encounters: EncountersService,
+    private readonly patients: PatientsRepository,
+  ) {}
 
   @Post()
   async create(
@@ -31,13 +35,14 @@ export class EncountersController {
   @Get()
   async listMine(@CurrentUser() user: CurrentUserPayload): Promise<Encounter[]> {
     const rows = await this.encounters.listMine(user.id);
-    return rows.map(toEncounterDto);
+    return rows.map((row) => toEncounterDto(row));
   }
 
   @Get(":id")
   async getOne(@CurrentUser() user: CurrentUserPayload, @Param("id") id: string): Promise<Encounter> {
     const row = await this.encounters.getForUser(id, user);
-    return toEncounterDto(row);
+    const patient = await this.patients.findById(row.patient_id);
+    return toEncounterDto(row, patient ?? undefined);
   }
 
   @Patch(":id/input")

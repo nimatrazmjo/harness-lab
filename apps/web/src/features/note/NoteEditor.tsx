@@ -1,4 +1,5 @@
 import type { SoapNote } from "@scribe/shared-types";
+import { AutoGrowTextarea } from "../../components/AutoGrowTextarea";
 
 export interface NoteEditorProps {
   note: SoapNote;
@@ -20,9 +21,8 @@ export function NoteEditor({ note, onChange, disabled }: NoteEditorProps) {
       {SECTIONS.map(({ key, label }) => (
         <div key={key} className="note-editor__section">
           <label htmlFor={`note-${key}`}>{label}</label>
-          <textarea
+          <AutoGrowTextarea
             id={`note-${key}`}
-            rows={key === "subjective" || key === "objective" ? 5 : 4}
             value={note[key]}
             disabled={disabled}
             onChange={(e) => onChange({ ...note, [key]: e.target.value })}

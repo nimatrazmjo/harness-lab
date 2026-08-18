@@ -73,6 +73,7 @@ the ICD-10 widget returns sensible codes for plain-English input and appends to 
 - [x] **admin.template_select** — provider picks a template; output visibly differs
 - [x] **admin.template_live_update** — admin edit takes effect on next generation, no refresh
 - [x] **admin.nav_wired** — shell nav (Encounters/Roster/Templates/Audit Log) routes to real pages, not placeholder `<li>` text
+- [x] **ui.professional_redesign** — patient-identity header, primary/secondary/danger button system, type scale, auto-growing readable-font SOAP editor, brand mark, subtle row hover, consistent form controls, aligned panel grid (provider + admin)
 - [x] **session.draft_persist** → **session.cross_device** — draft restores from RDS across refresh & devices
 
 **Done when:** an admin template edit changes the very next generation without a refresh, and a mid-encounter
