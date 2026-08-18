@@ -81,7 +81,34 @@ blocked` in `devops/feature-list.json`, not faked `passing`. Branch
 `feat/devops-terraform-ecr`, PR opened (not merged). Full detail:
 `devops/progress.md`/`devops/session-handoff.md` 2026-08-18 entries.
 
+## Sprint outcome — devops.ci_secret_scan (2026-08-18) — PASSING
+
+All three Done conditions met with real evidence: (1) `secret-scan` job runs on every PR via
+`.github/workflows/secret-scan.yml` (`gitleaks/gitleaks-action@v2`, `pull_request` trigger) —
+confirmed firing on PR #12; (2) `main` branch protection created fresh (previously none)
+requiring `secret-scan` — confirmed via `gh api .../protection | jq
+'.required_status_checks.contexts'` → `["secret-scan"]`, and a real PR (#13) showed
+`mergeStateStatus: "BLOCKED"` while the check was red; (3) PR #13's deliberate fake
+`AKIA...`-shaped string in `scratch.txt` produced a genuine `secret-scan: fail`. Bonus: the
+scanner also caught a real (if accidental) fake-key-shaped string I'd written into this file's
+own draft verify-plan text on the first run of PR #12 — fixed and squashed out of history.
+Branch protection added surgically — only `required_status_checks`, nothing else. No AWS
+touched, no-touch zone respected. Test PR #13 closed without merging, branch deleted
+locally+remotely. `devops/feature-list.json` → `passing`. Branch
+`feat/devops-ci-secret-scan`, PR #12 open, **not merged** (per this workstream's "never merge
+own PR" rule). Full detail: `devops/progress.md` 2026-08-18 entry.
+
 ## Active sprint
+
+**Feature(s):** _none — `devops.ci_secret_scan` above is the completed sprint for this
+session. Next `/devops` session: check whether `devops/manual.md` Step 9's IAM grant
+(`ecr:TagResource`) has landed for `devops.terraform_ecr`; if not, there's no unblocked Tier 0
+item and Tier 1 items beyond `ci_secret_scan` (`ci_build_images`, `ci_image_scan_trivy`)
+shouldn't be started without the same kind of explicit go-ahead this session had._
+
+## Superseded draft — the original contract for `devops.ci_secret_scan`, filled in before
+coding (kept for the concrete approach; all boxes below are now checked, see the "Sprint
+outcome" section above for the real evidence)
 
 **Feature(s):** `devops.ci_secret_scan` — explicitly dispatched this session (has
 `dependsOn: []`, so it does not require blocked Tier 0 items to unblock first; GitHub-side
@@ -115,42 +142,42 @@ maintained way to run gitleaks in GitHub Actions and needs no extra install step
 
 ### Done conditions (copied verbatim from `devops/feature-list.json` acceptance)
 
-- [ ] gitleaks (or equivalent) runs on every PR via GitHub Actions.
-- [ ] The check is a required status check — a PR cannot merge while it's red, enforced by
+- [x] gitleaks (or equivalent) runs on every PR via GitHub Actions.
+- [x] The check is a required status check — a PR cannot merge while it's red, enforced by
       branch protection on `main`.
-- [ ] A PR containing a deliberately fake AWS-shaped key string fails the check.
+- [x] A PR containing a deliberately fake AWS-shaped key string fails the check.
 
 ### Verification plan (real commands, run for real)
 
-- [ ] `actionlint .github/workflows/secret-scan.yml` — clean before pushing.
-- [ ] `gh api repos/:owner/:repo/branches/main/protection` — checked BEFORE any change (confirm
+- [x] `actionlint .github/workflows/secret-scan.yml` — clean before pushing.
+- [x] `gh api repos/:owner/:repo/branches/main/protection` — checked BEFORE any change (confirm
       starting state: none existed).
-- [ ] `gh api -X PUT repos/:owner/:repo/branches/main/protection ...` — add only
+- [x] `gh api -X PUT repos/:owner/:repo/branches/main/protection ...` — add only
       `required_status_checks.contexts` containing the secret-scan job's context name.
-- [ ] Real smoke PR: branch off this feature branch (it must already contain
+- [x] Real smoke PR: branch off this feature branch (it must already contain
       `secret-scan.yml` — a PR based on `main` alone won't trigger it pre-merge), commit a file
       containing an AWS-access-key-ID-shaped string (redacted here on purpose so this doc itself
       doesn't trip the scanner), push, `gh pr create --fill`, `gh pr checks` — secret-scan job
       must show failure.
-- [ ] `gh api repos/:owner/:repo/branches/main/protection | jq '.required_status_checks.contexts'
+- [x] `gh api repos/:owner/:repo/branches/main/protection | jq '.required_status_checks.contexts'
       | grep -q secret-scan`.
-- [ ] Clean up: close the smoke-test PR without merging, delete the branch (local + remote).
+- [x] Clean up: close the smoke-test PR without merging, delete the branch (local + remote).
 
 ### Invariants that must still hold
 
-- [ ] No static AWS credentials introduced anywhere (n/a — no AWS calls in this workflow).
-- [ ] No-touch zone respected (`git diff` confirms nothing under `apps/*/src` or `libs/**`).
-- [ ] Branch protection change is surgical — only the one required check added, nothing else
+- [x] No static AWS credentials introduced anywhere (n/a — no AWS calls in this workflow).
+- [x] No-touch zone respected (`git diff` confirms nothing under `apps/*/src` or `libs/**`).
+- [x] Branch protection change is surgical — only the one required check added, nothing else
       enabled.
-- [ ] Test PR containing the fake secret is closed (not merged) and its branch deleted after
+- [x] Test PR containing the fake secret is closed (not merged) and its branch deleted after
       the check is proven to fail.
 
 ### Definition of done
 
-- [ ] Every Done condition checked with real evidence.
-- [ ] Every verify command actually run, output recorded.
-- [ ] `devops/feature-list.json` → `passing` (or left `blocked`/`failing` with exact reason).
-- [ ] `devops/progress.md` + `devops/session-handoff.md` + this file updated in the same commit.
+- [x] Every Done condition checked with real evidence.
+- [x] Every verify command actually run, output recorded.
+- [x] `devops/feature-list.json` → `passing` (or left `blocked`/`failing` with exact reason).
+- [x] `devops/progress.md` + `devops/session-handoff.md` + this file updated in the same commit.
 
 ---
 

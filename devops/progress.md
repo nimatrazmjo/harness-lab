@@ -14,15 +14,53 @@ purpose, so a product-coding session never has to load infra history into contex
 
 ## Current state
 
-`devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`, and
-`devops.terraform_oidc_github` are all `passing`. The first three are merged to `main`;
-`terraform_oidc_github`'s three real bug fixes (see log entry below) are on PR #10, pending
-merge. `devops.terraform_ecr` is `blocked` on one more IAM grant (`ecr:TagResource` — see
-below and `devops/manual.md` Step 9); Terraform is fully written and ready to re-apply once
-granted. The two AWS-account-blocked items (`terraform_networking_rds`,
-`terraform_compute_envs`) are unaffected/unchanged.
+`devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`,
+`devops.terraform_oidc_github`, and now `devops.ci_secret_scan` are `passing`. The first three
+are merged to `main`; `terraform_oidc_github`'s three real bug fixes are on PR #10, pending
+merge; `ci_secret_scan` is on PR #12, pending merge. `devops.terraform_ecr` is `blocked` on one
+more IAM grant (`ecr:TagResource` — see `devops/manual.md` Step 9); Terraform is fully written
+and ready to re-apply once granted. The two AWS-account-blocked items
+(`terraform_networking_rds`, `terraform_compute_envs`) are unaffected/unchanged.
 
 ## Log
+
+### 2026-08-18 — devops.ci_secret_scan: passing (Tier 1, no AWS involved)
+
+Added `.github/workflows/secret-scan.yml` using `gitleaks/gitleaks-action@v2`, triggered on
+`pull_request` only (this repo's own `devops/manual.md` documents a `workflow_dispatch`
+registration quirk — `pull_request` is the reliable trigger). `actionlint` clean before
+pushing. Branch `feat/devops-ci-secret-scan`, PR #12 (open, not merged — never merge own PR
+per this workstream's rule).
+
+Real end-to-end proof, in order:
+1. Pushed the workflow on PR #12 itself — it fired immediately (contrary to an earlier worry,
+   carried over from the `oidc-smoke-test.yml` history, that a brand-new `pull_request`-
+   triggered workflow wouldn't run pre-merge; empirically it does run on the PR that introduces
+   it). It correctly **failed** on its first run — gitleaks caught a literal AWS-key-shaped
+   example string I'd written into `devops/sprint-contract.md`'s own verify-plan text (a real,
+   if accidental, demonstration that the scanner works). Fixed by describing the pattern
+   without a literal matching string, then squashed the fix into the same commit (force-pushed
+   the still-unshared feature branch — nobody else had based work on it) so the fake secret
+   never lingers in the PR's commit history. Both `secret-scan` and `verify-oidc` checks then
+   passed clean.
+2. `gh api repos/:owner/:repo/branches/main/protection` — confirmed `main` had **no** branch
+   protection at all beforehand. Created it fresh, surgically: `required_status_checks:
+   {strict: false, contexts: ["secret-scan"]}`, `enforce_admins: false`,
+   `required_pull_request_reviews: null`, `restrictions: null` — no reviews/linear-
+   history/push-restriction settings added, per the explicit "be surgical" instruction.
+3. Real smoke-test PR #13 (`test/secret-scan-smoke`, branched off the feature branch — a
+   branch off unmerged `main` alone wouldn't have the workflow file at all, so wouldn't trigger
+   it): committed `scratch.txt` containing a fake `AKIA...`-shaped string, pushed, opened the
+   PR. `secret-scan` check: **fail**. `gh pr view 13 --json mergeStateStatus` →
+   `"BLOCKED"` (branch protection is genuinely stopping the merge, not just showing a red X).
+   Closed PR #13 without merging, deleted `test/secret-scan-smoke` locally and on `origin`.
+4. Verified `gh api .../branches/main/protection | jq '.required_status_checks.contexts'` →
+   `["secret-scan"]`, matches the feature's literal verify command.
+
+No AWS resources touched (confirmed GitHub-side only). No-touch zone respected (`git diff`
+against `main` for this branch shows only `.github/workflows/secret-scan.yml`,
+`devops/feature-list.json`, `devops/progress.md`, `devops/session-handoff.md`,
+`devops/sprint-contract.md`). Status flipped to `passing` in `devops/feature-list.json`.
 
 ### 2026-08-18 — devops.terraform_ecr: blocked on ecr:TagResource
 

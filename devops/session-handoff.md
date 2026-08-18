@@ -6,9 +6,23 @@ protocol. Separate from the repo-root `session-handoff.md` on purpose._
 ## Where things stand
 
 `devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`,
-`devops.terraform_oidc_github` — all `passing`. First three merged to `main`;
-`terraform_oidc_github`'s bug fixes are on PR #10, not yet merged (unaffected by this session,
-don't merge on someone else's behalf).
+`devops.terraform_oidc_github`, `devops.ci_secret_scan` — all `passing`. First three merged to
+`main`; `terraform_oidc_github`'s bug fixes are on PR #10, not yet merged; `ci_secret_scan` is
+on PR #12, not yet merged (neither merged this session — don't merge on someone else's behalf).
+
+**New this session:** `main` now has branch protection (previously had none) requiring the
+`secret-scan` status check to pass before merge — added surgically, no other protection
+settings enabled. This affects every future PR to `main` from any workstream, not just devops.
+
+`devops.ci_secret_scan` (2026-08-18, this session) — **passing**.
+`.github/workflows/secret-scan.yml` (`gitleaks/gitleaks-action@v2`, `pull_request` trigger)
+runs on every PR. Verified for real: it fired and failed on its own introducing PR (caught a
+literal fake key I'd accidentally written into `sprint-contract.md`'s docs — fixed, squashed
+out of history, re-verified green); branch protection created fresh on `main` requiring it;
+a genuine throwaway PR (#13, branched off the feature branch, closed+deleted after) with a fake
+`AKIA...` string in `scratch.txt` got a **failing** `secret-scan` check and
+`mergeStateStatus: BLOCKED`. Branch `feat/devops-ci-secret-scan`, PR #12 open, not merged.
+Full detail: `devops/progress.md` 2026-08-18 entry.
 
 `devops.terraform_ecr` — **`blocked`** (2026-08-18, this session), not resumable by an agent
 alone. Terraform is fully written and correct (`infra/terraform/main.tf`:
@@ -36,10 +50,14 @@ REJECTED — this is the load-bearing proof per the feature's acceptance criteri
 `describe-repositories` showing `IMMUTABLE`). Also run `aws ecr get-lifecycle-policy` for both
 repos to confirm the untagged-7-day-expiry rule, and clean up the smoke-test tag afterward.
 
-Until that grant lands, there's no other unblocked Tier 0 item — `terraform_networking_rds`
-and `terraform_compute_envs` are blocked for unrelated reasons (domain name, sequencing). Flag
-back to the user rather than jumping to Tier 1 (Tier 0 must be fully `passing` first per
-`devops/AGENTS.md`).
+`devops.terraform_ecr` is still the only unblocked-in-principle-but-actually-blocked Tier 0
+item — `terraform_networking_rds` and `terraform_compute_envs` are blocked for unrelated
+reasons (domain name, sequencing). `devops.ci_secret_scan` (Tier 1, this session) had
+`dependsOn: []` so it was explicitly dispatched ahead of full Tier 0 completion — that's a
+one-off, not a change to the "Tier 0 before Tier 1" rule; don't treat it as license to jump to
+other Tier 1 items (`ci_build_images`, `ci_image_scan_trivy`) without the same explicit
+go-ahead. Flag Tier 0's blocked state back to the user rather than deciding unilaterally to
+keep working Tier 1.
 
 ## Known gaps
 
@@ -66,3 +84,12 @@ back to the user rather than jumping to Tier 1 (Tier 0 must be fully `passing` f
   immediately and is the reliable fallback. Documented in `devops/manual.md`.
 - `actionlint` (installed via `brew install actionlint`) is available locally — lint any
   new/edited workflow YAML with it before pushing.
+- **New this session — refines the `workflow_dispatch` note above:** a brand-new
+  `pull_request`-triggered workflow (no `workflow_dispatch`) DOES run on the very PR that
+  introduces it (confirmed for `secret-scan.yml` on PR #12) — the "needs to exist on the
+  default branch first" behavior observed for `oidc-smoke-test.yml` was specific to
+  `workflow_dispatch`'s dispatch-eligibility cache, not a general `pull_request` limitation.
+  The real remaining constraint: a `pull_request`-triggered workflow only fires for a PR whose
+  diff/merge-view actually contains that workflow file — a PR based purely on unmerged `main`
+  (which doesn't have the file yet) won't trigger it. That's why this session's smoke-test PR
+  (#13) was branched off the feature branch itself rather than off `main`.

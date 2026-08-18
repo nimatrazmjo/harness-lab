@@ -173,7 +173,7 @@
             "id": "devops.ci_secret_scan",
             "tier": 1,
             "title": "CI: hardcoded-secret scan as a required PR check",
-            "status": "failing",
+            "status": "passing",
             "description": "Promotes the existing scripts/check-no-committed-secrets.sh (gitleaks, currently a local/manual script backing infra.env_secrets) into an actual required GitHub Actions check on every PR — not just something an agent is supposed to remember to run.",
             "acceptance": [
                 "gitleaks (or equivalent) runs on every PR via GitHub Actions.",
