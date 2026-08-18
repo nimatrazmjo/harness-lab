@@ -1,12 +1,16 @@
+import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../../state/auth-context";
 
-const ADMIN_SECTIONS = ["Encounters", "Roster", "Templates", "Audit Log"];
+const ADMIN_SECTIONS = [
+  { label: "Encounters", to: "encounters" },
+  { label: "Roster", to: "roster" },
+  { label: "Templates", to: "templates" },
+  { label: "Audit Log", to: "audit-log" },
+];
 
 /**
- * The admin nav/layout shell — distinct from the provider workspace shell. This is the single
- * attachment point the rest of the admin surface (view-all, roster, templates) renders into;
- * those pages are backend-complete already (see feature-list.json admin.*) and are not wired
- * into this nav yet.
+ * The admin nav/layout shell — distinct from the provider workspace shell. Each nav item is a
+ * real route; the matched child page renders into the <Outlet /> below.
  */
 export function AdminShell() {
   const { user, logout } = useAuth();
@@ -25,12 +29,16 @@ export function AdminShell() {
       <nav className="admin-shell__nav" aria-label="Admin sections">
         <ul>
           {ADMIN_SECTIONS.map((section) => (
-            <li key={section}>{section}</li>
+            <li key={section.to}>
+              <NavLink to={section.to} className={({ isActive }) => (isActive ? "is-active" : undefined)}>
+                {section.label}
+              </NavLink>
+            </li>
           ))}
         </ul>
       </nav>
       <div className="panel admin-shell__content">
-        <p>Admin dashboard.</p>
+        <Outlet />
       </div>
     </div>
   );

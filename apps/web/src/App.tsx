@@ -1,6 +1,10 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { AdminAuditLogPage } from "./features/admin/AdminAuditLogPage";
+import { AdminEncountersPage } from "./features/admin/AdminEncountersPage";
+import { AdminRosterPage } from "./features/admin/AdminRosterPage";
 import { AdminRoute } from "./features/admin/AdminRoute";
 import { AdminShell } from "./features/admin/AdminShell";
+import { AdminTemplatesPage } from "./features/admin/AdminTemplatesPage";
 import { LoginPage } from "./features/auth/LoginPage";
 import { EncounterListPage } from "./features/encounter/EncounterListPage";
 import { EncounterWorkspacePage } from "./features/encounter/EncounterWorkspacePage";
@@ -39,7 +43,13 @@ export function App() {
             <AdminShell />
           </AdminRoute>
         }
-      />
+      >
+        <Route index element={<Navigate to="encounters" replace />} />
+        <Route path="encounters" element={<AdminEncountersPage />} />
+        <Route path="roster" element={<AdminRosterPage />} />
+        <Route path="templates" element={<AdminTemplatesPage />} />
+        <Route path="audit-log" element={<AdminAuditLogPage />} />
+      </Route>
       <Route path="*" element={<Navigate to="/encounters" replace />} />
     </Routes>
   );
