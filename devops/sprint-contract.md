@@ -67,18 +67,92 @@ Left `status: blocked` in `devops/feature-list.json` with the precise reason, pe
 `devops/manual.md`/`devops/AGENTS.md`'s "don't fake passing" rule. PR #9 open, not merged.
 Full detail: `devops/progress.md` 2026-08-18 entry, `devops/manual.md` Step 8 + Log.
 
+## Sprint outcome — devops.terraform_ecr (2026-08-18) — BLOCKED, not passing
+
+Terraform written and `plan`-clean (`4 to add, 0 to change, 0 to destroy` for
+`aws_ecr_repository.scribe["scribe-api"/"scribe-web"]` +
+`aws_ecr_lifecycle_policy.scribe_expire_untagged`), but `terraform apply` hit real
+`AccessDenied` on `ecr:TagResource` for both repos before either was created (confirmed no
+partial resources via `describe-repositories` + `terraform state list`). Root cause: the
+existing `EcrRepos` grant covers `CreateRepository` but not the separate `TagResource` action
+bundled into that call via the provider's `default_tags`. Zero of the four required `verify`
+commands could run for real. Exact minimal fix in `devops/manual.md` Step 9. Left `status:
+blocked` in `devops/feature-list.json`, not faked `passing`. Branch
+`feat/devops-terraform-ecr`, PR opened (not merged). Full detail:
+`devops/progress.md`/`devops/session-handoff.md` 2026-08-18 entries.
+
 ## Active sprint
 
-**Feature(s):** _none — `devops.terraform_oidc_github` is `blocked` on an IAM permissions
-grant (see above), not resumable by an agent alone. `devops.terraform_ecr` `dependsOn` it and
-shouldn't start until it's actually `passing`. Next `/devops` session should first check
-whether Step 8's IAM grant landed and/or PR #9 merged (which would unstick the smoke-test
-workflow too); if neither, there is no unblocked Tier 0 item left to work — flag that back to
-the user rather than jumping to Tier 1._
+**Feature(s):** _none — `devops.terraform_ecr` is `blocked` on the `ecr:TagResource` IAM grant
+(see above), not resumable by an agent alone. Next `/devops` session should first check
+whether Step 9's grant landed; if not, there is no unblocked Tier 0 item left to work — flag
+that back to the user rather than jumping to Tier 1._
 
 **Goal (one sentence):** _—_
 
 **Tier:** _—_ · **Branch:** _—_
+
+---
+
+## Superseded draft — was filled in before the IAM blocker was hit (kept for the concrete
+approach and Done-condition checklist, still valid once Step 9's grant lands)
+
+**Goal (one sentence):** Provision two ECR repositories (`scribe-api`, `scribe-web`) via
+Terraform with `imageTagMutability = IMMUTABLE`, native scan-on-push enabled, and a lifecycle
+policy expiring untagged images after 7 days — proven for real via a genuine double-push
+rejection test, not just an `describe-repositories` field check.
+
+**Tier:** 0 · **Branch:** `feat/devops-terraform-ecr`
+
+### Context
+
+`devops-agent`'s `scribe-devops-infra` managed policy already has `EcrRepos` (scoped to
+`arn:aws:ecr:*:*:repository/scribe-*`, includes `CreateRepository`, `PutImageTagMutability`,
+`PutLifecyclePolicy`, `PutImageScanningConfiguration`, plus push actions) and `EcrAuth`
+(`ecr:GetAuthorizationToken` on `*`) statements from an earlier round. Plan: try
+`terraform plan`/`apply` first: don't pre-emptively ask for a new IAM grant.
+
+### Explicitly OUT of scope this sprint
+
+- Any resource under `apps/api/src/**`, `apps/web/src/**`, `libs/**` — permanent no-touch zone.
+- `devops.terraform_networking_rds` / `devops.terraform_compute_envs` — separate, blocked
+  features, not touched here.
+- CI workflows that push to ECR (`devops.cd_push_ecr_main`) — Tier 2, not this sprint.
+
+### Done conditions (copied verbatim from `devops/feature-list.json` acceptance)
+
+- [ ] Both repos have `imageTagMutability = IMMUTABLE`.
+- [ ] `scanOnPush` enabled on both.
+- [ ] Lifecycle policy expires untagged manifests >7 days old.
+- [ ] Pushing the same tag twice fails (proves immutability, not just configured).
+
+### Verification plan (real commands, run for real against AWS)
+
+- [ ] `terraform plan` / `terraform apply` in `infra/terraform/` (local apply, human-authorized
+      exception for this Tier 0 bootstrap phase per `devops/manual.md` precedent — document in
+      `devops/progress.md`).
+- [ ] `aws ecr describe-repositories --repository-names scribe-api scribe-web --query
+      'repositories[].imageTagMutability'` — expect 2x `IMMUTABLE`.
+- [ ] `aws ecr get-login-password | docker login` then `docker push
+      <account>.dkr.ecr.us-east-1.amazonaws.com/scribe-api:smoke-test-tag` — first push succeeds.
+- [ ] Same push again, same tag — must be REJECTED (this is the load-bearing proof).
+- [ ] `aws ecr get-lifecycle-policy --repository-name scribe-api` (and `-web`) — confirm the
+      untagged-expire-after-7-days rule.
+- [ ] Clean up the smoke-test tag/image afterward.
+
+### Invariants that must still hold
+
+- [ ] No static AWS credentials introduced anywhere.
+- [ ] No `latest` tag used anywhere, including in this sprint's own smoke test.
+- [ ] No-touch zone respected (`git diff` confirms nothing under `apps/*/src` or `libs/**`).
+- [ ] Local `terraform apply` logged in `devops/progress.md` with justification.
+
+### Definition of done
+
+- [ ] Every Done condition checked with real evidence.
+- [ ] Every verify command actually run, output recorded.
+- [ ] `devops/feature-list.json` → `passing` (or left `blocked` with exact reason, no faking).
+- [ ] `devops/progress.md` + `devops/session-handoff.md` + this file updated in the same commit.
 
 ---
 

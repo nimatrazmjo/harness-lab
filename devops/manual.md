@@ -340,6 +340,69 @@ test now passes end-to-end for real.
 
 ---
 
+## Step 9 — Round 5: `ecr:TagResource` for `devops.terraform_ecr`
+
+`terraform apply` for the two `aws_ecr_repository` resources (`scribe-api`, `scribe-web`) fails
+immediately, before either repo exists:
+
+```
+Error: creating ECR Repository (scribe-api): operation error ECR: CreateRepository, https
+response error StatusCode: 400, RequestID: 95e6933b-cfcc-4547-a15a-38e3f3434857, api error
+AccessDeniedException: User: arn:aws:iam::404063516240:user/devops-agent is not authorized to
+perform: ecr:TagResource on resource: arn:aws:ecr:us-east-1:404063516240:repository/scribe-api
+because no identity-based policy allows the ecr:TagResource action
+```
+
+Same for `scribe-web` (`.../repository/scribe-web`). Confirmed via `aws ecr
+describe-repositories --repository-names scribe-api scribe-web` afterward → both
+`RepositoryNotFoundException` — the AWS API rejects `CreateRepository` atomically when the
+tagging half of the same call is denied (this account's provider `default_tags` block applies
+`Project`/`ManagedBy` tags on create), so nothing partial was left behind; `terraform state
+list` shows no `aws_ecr_repository`/`aws_ecr_lifecycle_policy` resources.
+
+Root cause: the existing `scribe-devops-infra` policy's `EcrRepos` statement (Step 1 above)
+lists `CreateRepository`, `PutImageTagMutability`, `PutLifecyclePolicy`,
+`PutImageScanningConfiguration`, and various push/read actions, scoped to
+`arn:aws:ecr:*:*:repository/scribe-*` — but not `ecr:TagResource`, which is a distinct action
+from `CreateRepository` even though this SDK call bundles them.
+
+**Minimal fix:** add `ecr:TagResource` (and `ecr:UntagResource` / `ecr:ListTagsForResource` for
+completeness, so a future tag change or read-back doesn't trigger another round) to the
+`EcrRepos` statement's action list, same resource scope (`arn:aws:ecr:*:*:repository/scribe-*`).
+Same `create-policy-version --set-as-default` process as Steps 6a/7/8, but this time on the
+**`scribe-devops-infra`** managed policy (not `scribe-devops-bootstrap`):
+
+```bash
+cat > scribe-devops-infra-policy-v2.json <<'EOF'
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {"Sid": "NetworkingCompute", "Effect": "Allow", "Action": ["ec2:Describe*","ec2:CreateVpc","ec2:DeleteVpc","ec2:ModifyVpcAttribute","ec2:CreateSubnet","ec2:DeleteSubnet","ec2:CreateSecurityGroup","ec2:DeleteSecurityGroup","ec2:AuthorizeSecurityGroupIngress","ec2:AuthorizeSecurityGroupEgress","ec2:RevokeSecurityGroupIngress","ec2:RevokeSecurityGroupEgress","ec2:CreateRouteTable","ec2:DeleteRouteTable","ec2:CreateRoute","ec2:DeleteRoute","ec2:AssociateRouteTable","ec2:DisassociateRouteTable","ec2:CreateInternetGateway","ec2:DeleteInternetGateway","ec2:AttachInternetGateway","ec2:DetachInternetGateway","ec2:RunInstances","ec2:TerminateInstances","ec2:ModifyInstanceAttribute","ec2:CreateTags","ec2:DeleteTags"], "Resource": "*"},
+        {"Sid": "RdsDatabase", "Effect": "Allow", "Action": ["rds:CreateDBInstance","rds:DeleteDBInstance","rds:ModifyDBInstance","rds:DescribeDBInstances","rds:CreateDBSubnetGroup","rds:DeleteDBSubnetGroup","rds:DescribeDBSubnetGroups","rds:AddTagsToResource","rds:ListTagsForResource"], "Resource": "*"},
+        {"Sid": "EcrRepos", "Effect": "Allow", "Action": ["ecr:CreateRepository","ecr:DeleteRepository","ecr:DescribeRepositories","ecr:PutImageTagMutability","ecr:PutLifecyclePolicy","ecr:PutImageScanningConfiguration","ecr:TagResource","ecr:UntagResource","ecr:ListTagsForResource","ecr:BatchCheckLayerAvailability","ecr:PutImage","ecr:InitiateLayerUpload","ecr:UploadLayerPart","ecr:CompleteLayerUpload","ecr:BatchGetImage","ecr:DescribeImages","ecr:ListImages"], "Resource": "arn:aws:ecr:*:*:repository/scribe-*"},
+        {"Sid": "EcrAuth", "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*"},
+        {"Sid": "SsmDeploy", "Effect": "Allow", "Action": ["ssm:SendCommand","ssm:GetCommandInvocation","ssm:ListCommandInvocations","ssm:DescribeInstanceInformation"], "Resource": "*", "Condition": {"StringEquals": {"ssm:resourceTag/deploy": "true"}}},
+        {"Sid": "IamInstanceProfileMgmt", "Effect": "Allow", "Action": ["iam:CreateInstanceProfile","iam:DeleteInstanceProfile","iam:AddRoleToInstanceProfile","iam:RemoveRoleFromInstanceProfile","iam:GetInstanceProfile"], "Resource": "arn:aws:iam::404063516240:instance-profile/scribe-*"}
+    ]
+}
+EOF
+
+aws iam create-policy-version \
+  --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-infra \
+  --policy-document file://scribe-devops-infra-policy-v2.json \
+  --set-as-default \
+  --profile default
+```
+
+(swap `--profile default` for the real admin profile; if `LimitExceeded`, same as Steps 6a/7/8
+— delete the oldest non-default version of `scribe-devops-infra` first, then retry.)
+
+Once granted, re-run `terraform apply` in `infra/terraform/` for `devops.terraform_ecr` and the
+full verify sequence (`describe-repositories` for `IMMUTABLE`, the double-push smoke test,
+`get-lifecycle-policy`).
+
+---
+
 ## Log
 
 - **2026-08-18** — First grant attempt (inline user policy) had no effect: `terraform apply`
@@ -376,3 +439,13 @@ test now passes end-to-end for real.
   exact fix. Feature left `blocked` in `devops/feature-list.json`, not faked `passing` — 2 of
   the 3 minimum required proofs (`get-role`, `get-open-id-connect-provider`) are done for real;
   the third (`simulate-principal-policy`) needs Step 8's grant.
+- **2026-08-18** — `devops.terraform_ecr`: `terraform plan` was clean (`4 to add, 0 to change,
+  0 to destroy` — 2 `aws_ecr_repository` + 2 `aws_ecr_lifecycle_policy`), but `terraform apply`
+  failed immediately on `ecr:TagResource` denied for both `scribe-api` and `scribe-web` (the
+  existing `EcrRepos` grant covers `CreateRepository` but not the separate `TagResource` action
+  that the same API call bundles when `default_tags` are set). Confirmed no partial resources
+  created (`describe-repositories` → `RepositoryNotFoundException` for both, `terraform state
+  list` shows no ECR resources) — AWS rejects the whole `CreateRepository` call atomically when
+  its tagging half is denied, so nothing to clean up. Step 9 above documents the exact minimal
+  fix (add `ecr:TagResource`/`UntagResource`/`ListTagsForResource` to `scribe-devops-infra`'s
+  `EcrRepos` statement). Feature left `blocked` in `devops/feature-list.json`.

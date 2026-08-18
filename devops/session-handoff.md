@@ -5,49 +5,41 @@ protocol. Separate from the repo-root `session-handoff.md` on purpose._
 
 ## Where things stand
 
-`devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend` — all `passing`,
-merged to `main`.
+`devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`,
+`devops.terraform_oidc_github` — all `passing`. First three merged to `main`;
+`terraform_oidc_github`'s bug fixes are on PR #10, not yet merged (unaffected by this session,
+don't merge on someone else's behalf).
 
-`devops.terraform_oidc_github` — **`passing`** (2026-08-18, this session). Fully verified for
-real: the `oidc-smoke-test.yml` GitHub Actions workflow ran end-to-end via a genuine
-`pull_request` trigger and every step passed (role assumed via OIDC with zero static keys,
-temporary-credential check, in-scope ECR/SSM actions succeeded, out-of-scope ECR
-repo/`iam:ListUsers` genuinely denied). `aws iam simulate-principal-policy` independently
-confirmed the same least-privilege scoping.
+`devops.terraform_ecr` — **`blocked`** (2026-08-18, this session), not resumable by an agent
+alone. Terraform is fully written and correct (`infra/terraform/main.tf`:
+`aws_ecr_repository.scribe` for_each over `scribe-api`/`scribe-web` with
+`image_tag_mutability = "IMMUTABLE"` + `scan_on_push = true`, plus
+`aws_ecr_lifecycle_policy.scribe_expire_untagged` expiring untagged images after 7 days).
+`terraform plan` is clean (`4 to add, 0 to change, 0 to destroy`). `terraform apply` fails on a
+real `AccessDenied` for `ecr:TagResource` on both repo ARNs — the existing
+`scribe-devops-infra` policy's `EcrRepos` statement covers `CreateRepository` but not the
+separate `TagResource` action that gets bundled into the same API call because of the
+provider's `default_tags`. No partial resources created (confirmed via `describe-repositories`
+and `terraform state list`). Exact minimal fix in `devops/manual.md` Step 9 — an admin needs to
+add `ecr:TagResource`/`ecr:UntagResource`/`ecr:ListTagsForResource` to that policy's `EcrRepos`
+statement (same `arn:aws:ecr:*:*:repository/scribe-*` scope) via `create-policy-version`.
 
-**Getting there surfaced and fixed 3 real, unrelated bugs** (full detail in
-`devops/progress.md`'s 2026-08-18 entry) — worth knowing about if similar workflows/Terraform
-get written later:
-1. A YAML syntax error (unquoted `run:` value containing `": "` inside an embedded shell
-   string) silently failed every single run since the workflow was created — `actionlint`
-   caught it, `gh run view --log` did not (parse-level failures give no useful job/step logs).
-2. The OIDC trust policy's `sub` condition assumed the plain `repo:owner/repo:...` format, but
-   this GitHub account's actual default subject claim bakes in immutable owner_id/repo_id
-   (`repo:nimatrazmjo@3712526/harness-lab@1332166375:...`) — confirmed by decoding a real ID
-   token, not from docs. Fixed in `infra/terraform/main.tf`'s `github_oidc_sub_prefix` local,
-   with a comment explaining why (this will silently break again if this Terraform is ever
-   forked to a different account without re-checking).
-3. The smoke test's own "no static credentials" check was backwards — it treated the mere
-   presence of the `AWS_ACCESS_KEY_ID` env var as proof of a static key, but
-   `aws-actions/configure-aws-credentials` always exports temporary STS credentials under that
-   same env var name. Fixed to check the actual signals (`ASIA` prefix + `AWS_SESSION_TOKEN`
-   present).
-
-**PR #10 has these 3 fixes and needs a normal merge** — it started as a throwaway
-trigger-only PR (to get the `pull_request` event to fire) but ended up carrying real,
-verified infra/workflow fixes. Don't close it without merging.
+Branch `feat/devops-terraform-ecr`, PR opened this session (see PR list / `gh pr list` for
+URL) — **not merged**, contains real Terraform + docs changes, no faked `passing` status.
 
 ## Next feature to work
 
-**`devops.terraform_ecr`** (Tier 0, now fully unblocked — its `dependsOn` is satisfied).
-`devops-agent`'s `scribe-devops-infra` managed policy already has `EcrRepos`/`EcrAuth`
-statements from an earlier round — check whether that's sufficient before assuming a fresh IAM
-grant is needed; if not, expect the same iterative discovery pattern documented in
-`devops/manual.md` (run `terraform apply` for real, capture the exact denied action, don't
-guess a broad fix).
+Once Step 9's grant lands: re-run `AWS_PROFILE=devops-agent terraform apply` in
+`infra/terraform/` for `devops.terraform_ecr`, then the full verify sequence — especially the
+**double-push immutability test** (push `scribe-api:smoke-test-tag` twice, second push must be
+REJECTED — this is the load-bearing proof per the feature's acceptance criteria, not just
+`describe-repositories` showing `IMMUTABLE`). Also run `aws ecr get-lifecycle-policy` for both
+repos to confirm the untagged-7-day-expiry rule, and clean up the smoke-test tag afterward.
 
-`devops.terraform_networking_rds` / `devops.terraform_compute_envs` remain `blocked` for
-unrelated reasons (domain name for certbot; sequencing). Unaffected by this session.
+Until that grant lands, there's no other unblocked Tier 0 item — `terraform_networking_rds`
+and `terraform_compute_envs` are blocked for unrelated reasons (domain name, sequencing). Flag
+back to the user rather than jumping to Tier 1 (Tier 0 must be fully `passing` first per
+`devops/AGENTS.md`).
 
 ## Known gaps
 
@@ -61,15 +53,16 @@ unrelated reasons (domain name for certbot; sequencing). Unaffected by this sess
   requires the AWS console or an admin profile.
 - `devops-agent`'s create/manage IAM grants don't automatically cover verification/read actions
   like `iam:SimulatePrincipalPolicy` — a distinct category from the `Get*`/`Describe*`
-  read-back gaps found in `devops.terraform_backend`. Expect this to recur for future features
-  that lean on `simulate-principal-policy`-style proofs.
+  read-back gaps found in `devops.terraform_backend`.
+- **New this session:** a resource's "create" action grant does not automatically cover
+  `TagResource` when the Terraform AWS provider applies `default_tags` at creation time — a
+  third distinct category of IAM gap (alongside "Create* doesn't cover Get*/Describe* read-back"
+  and "manage actions don't cover Simulate*/verification actions") worth checking for
+  proactively on the next new resource type (RDS, EC2) rather than discovering it fresh each
+  time.
 - **`workflow_dispatch` can get permanently stuck for a workflow's lifetime if its GitHub
   Actions "workflow ID" was first registered while the file only existed on a non-default
-  branch** — merging to `main` does NOT reliably fix it (confirmed: waited 2+ minutes, polled
-  repeatedly, still `422 Workflow does not have 'workflow_dispatch' trigger` well after merge).
-  The `pull_request` trigger worked immediately and is the reliable fallback — use it instead
-  of fighting `workflow_dispatch` registration lag. Documented in `devops/manual.md`.
-- `actionlint` (installed this session via `brew install actionlint`) is now available locally
-  — lint any new/edited workflow YAML with it before pushing; a parse-level YAML error gives no
-  useful job/step logs via `gh run view`, only a generic "workflow file issue" annotation, so
-  catching it before push saves a full debug cycle.
+  branch** — merging to `main` does NOT reliably fix it. The `pull_request` trigger worked
+  immediately and is the reliable fallback. Documented in `devops/manual.md`.
+- `actionlint` (installed via `brew install actionlint`) is available locally — lint any
+  new/edited workflow YAML with it before pushing.

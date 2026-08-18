@@ -185,3 +185,51 @@ output "github_actions_oidc_provider_arn" {
 output "github_actions_role_arn" {
   value = aws_iam_role.github_actions_deploy.arn
 }
+
+# ---------------------------------------------------------------------------
+# devops.terraform_ecr
+#
+# ECR repositories for scribe-api and scribe-web. Tag immutability is ON — a pushed tag can
+# never be overwritten, which is what makes "always deploy by git SHA, never `latest`"
+# actually enforced rather than just a convention agents are supposed to remember. Native
+# ECR scan-on-push is defense-in-depth alongside the (separate, later) Trivy CI gate. Untagged
+# images (orphaned after a repush/cleanup) expire after 7 days via lifecycle policy.
+# ---------------------------------------------------------------------------
+
+resource "aws_ecr_repository" "scribe" {
+  for_each = toset(local.ecr_repo_names)
+
+  name                 = each.value
+  image_tag_mutability = "IMMUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+resource "aws_ecr_lifecycle_policy" "scribe_expire_untagged" {
+  for_each   = aws_ecr_repository.scribe
+  repository = each.value.name
+
+  policy = jsonencode({
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Expire untagged images older than 7 days"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 7
+        }
+        action = {
+          type = "expire"
+        }
+      }
+    ]
+  })
+}
+
+output "ecr_repository_urls" {
+  value = { for name, repo in aws_ecr_repository.scribe : name => repo.repository_url }
+}
