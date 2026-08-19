@@ -18,22 +18,75 @@ Tier 0 is done except the two real-AWS items genuinely blocked on a pending scop
 (`terraform_networking_rds`, `terraform_compute_envs` — domain `test.nimat.dev` now decided,
 full 3-env (dev/staging/prod) rollout confirmed, but not yet dispatched — real ongoing-cost
 resources, needs explicit go-ahead each time per this workstream's pattern). All of Tier 0's
-other items (`dockerfile_api`, `dockerfile_web`, `terraform_backend`, `terraform_oidc_github`)
-are `passing` and merged; `terraform_ecr`'s status has a discrepancy between this file and
-`devops/feature-list.json` noted separately below — not touched or resolved this session, flagged
-for the next session to reconcile. Tier 1: `ci_secret_scan`, `ci_build_images`, and now
-`ci_image_scan_trivy` are `passing`. `cd_push_ecr_main` (Tier 2) is next — nothing in this
-session touched Tier 2.
-
-**Note for next session:** `devops/feature-list.json` currently shows `devops.terraform_ecr` as
-`status: blocked` (with a detailed blocked-rubric note about an `ecr:TagResource` IAM gap), but
-this file's prior entries and `devops/session-handoff.md` (as last written before this session)
-both described it as `passing`/merged. Did not investigate or touch this discrepancy — out of
-scope for `devops.ci_image_scan_trivy` — but it should be reconciled (check the real AWS state
-via `aws ecr describe-repositories`) before `devops.cd_push_ecr_main` is started, since that
-feature `dependsOn` it.
+other items (`dockerfile_api`, `dockerfile_web`, `terraform_backend`, `terraform_oidc_github`,
+and now `terraform_ecr`, reconciled this session — see log entry below) are `passing` and merged
+(`terraform_ecr`'s doc-flip is on this session's PR, pending merge). Tier 1: `ci_secret_scan`,
+`ci_build_images`, and `ci_image_scan_trivy` are `passing`. `cd_push_ecr_main` (Tier 2) is now
+safely startable — all three of its `dependsOn` are `passing` — nothing in this session touched
+Tier 2 implementation itself, only unblocked it via the reconciliation.
 
 ## Log
+
+### 2026-08-18 — devops.terraform_ecr: status reconciliation, blocked -> passing (docs-only sprint)
+
+Picked up the discrepancy flagged by the prior two sessions (`devops.ci_build_images`,
+`devops.ci_image_scan_trivy`): `devops/feature-list.json` read `devops.terraform_ecr` as
+`blocked` (real `ecr:TagResource` AccessDenied, "no partial resources created" — see the
+2026-08-18 blocked entry further below), but `devops/session-handoff.md` suspected a later
+session had actually finished it without the docs catching up. Root-caused via `git log --all`:
+PR #11 (`feat/devops-terraform-ecr`) merged to `main` at commit `8a35335`, the *blocked* state —
+but the remote branch `origin/feat/devops-terraform-ecr` was never deleted after merge and
+carries one further, never-merged commit, `be8a00f` ("docs(devops): flip terraform_ecr to
+passing with real double-push proof"). That commit documents 2 more IAM rounds
+(`devops/manual.md` Steps 9-10: `ecr:TagResource`, then a second gap on
+`ecr:GetLifecyclePolicy` — same create-granted/read-back-not pattern already seen on
+`devops.terraform_backend`) and a completed real double-push immutability proof, but it only
+ever landed on the stranded branch tip — never merged into `main`, so `feature-list.json` kept
+reading `blocked` while the branch's own docs (and real AWS) already said otherwise.
+
+Did not trust either doc — independently re-verified all 4 acceptance criteria live against AWS
+this session (`AWS_PROFILE=devops-agent`):
+- `aws ecr describe-repositories --repository-names scribe-api scribe-web` → both
+  `imageTagMutability: IMMUTABLE`, both `scanOnPush: true`.
+- `aws ecr get-lifecycle-policy` on both → untagged-image 7-day expiry rule present and
+  correctly worded on both.
+- **Live double-push test, run fresh, not just re-read from the stranded commit's claims:**
+  `docker login` via `aws ecr get-login-password`; pushed `alpine:3.19` to
+  `scribe-api:smoke-test-tag` — succeeded, but as an idempotent no-op (the tag already held that
+  exact digest from the prior session's own test, so this proved nothing new by itself). Pushed
+  a genuinely *different* image, `alpine:3.18`, to the same `smoke-test-tag` — **rejected**:
+  `error from registry: The image tag 'smoke-test-tag' already exists in the 'scribe-api'
+  repository and cannot be overwritten because the tag is immutable.` This is the load-bearing
+  proof, run today, not trusted from documentation.
+- `cd infra/terraform && terraform plan` (plan-only, **no apply run**, per this workstream's
+  non-negotiable) → `No changes. Your infrastructure matches the configuration.` Both
+  `aws_ecr_repository.scribe[*]` and `aws_ecr_lifecycle_policy.scribe_expire_untagged[*]` are
+  cleanly tracked in real remote state — directly refutes the old blocked-rubric's "no partial
+  resources created" as no longer the current reality (it was accurate for the state at the time
+  it was written; a later session actually finished the apply).
+- Attempted `aws ecr batch-delete-image` on the leftover `smoke-test-tag` — reconfirmed
+  `AccessDeniedException` on `ecr:BatchDeleteImage`, matching the documented known gap. Left the
+  leftover tag alone per that gap, didn't fight it.
+
+**Provenance check (CI vs local):** confirmed via `git log`/`gh pr list` that both ECR repos and
+their lifecycle policies were created by a **local** `terraform apply` under
+`AWS_PROFILE=devops-agent` (the commits/PR history matches `devops/manual.md`'s and this file's
+own prior entries for the feature), not by CI — and this repo has **no** GitHub Actions workflow
+that runs `terraform apply` at all yet (only `secret-scan.yml`, `build-images.yml`,
+`oidc-smoke-test.yml` exist; grepped for `terraform apply` across `.github/workflows/`, no hits).
+This local apply matches the same documented Tier-0-bootstrap exception already used for
+`devops.terraform_backend` and `devops.terraform_oidc_github` — a deliberate, precedented
+carve-out for the chicken-and-egg problem of bootstrapping the very infra (OIDC role, ECR repos)
+that a future CI-driven apply pipeline would need to exist first — not an undocumented shortcut.
+
+`devops/feature-list.json` → `devops.terraform_ecr` `passing`, rubric note rewritten with
+today's date, the live evidence above, and an explanation of exactly where the stale `blocked`
+status came from. `devops.cd_push_ecr_main` (Tier 2) — all three of its `dependsOn`
+(`terraform_ecr`, `ci_secret_scan`, `ci_image_scan_trivy`) are now `passing`; it's safely
+startable. No Terraform/Dockerfile/workflow files touched this sprint — docs only
+(`feature-list.json`, `progress.md`, `session-handoff.md`, `sprint-contract.md`). Branch
+`docs/devops-terraform-ecr-reconcile`, PR opened (not merged — see
+`devops/session-handoff.md`).
 
 ### 2026-08-18 — devops.ci_image_scan_trivy: passing — found + fixed real CVEs, not suppressed
 

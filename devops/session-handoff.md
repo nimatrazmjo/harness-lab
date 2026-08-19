@@ -8,14 +8,28 @@ protocol. Separate from the repo-root `session-handoff.md` on purpose._
 **Tier 0** — done except two items genuinely blocked on a pending scope decision, not a
 technical/IAM issue:
 - `devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`,
-  `devops.terraform_oidc_github` — all `passing`, merged to `main`.
-- `devops.terraform_ecr` — **status discrepancy, unresolved, flagged this session**: this file
-  previously said `passing`/merged, but `devops/feature-list.json`'s actual `status` field reads
-  `blocked` (with a detailed rubric note about an `ecr:TagResource` IAM gap). Did not
-  investigate which is correct — out of scope for this session's feature
-  (`devops.ci_image_scan_trivy`) — but reconcile this (check real AWS state via `aws ecr
-  describe-repositories --repository-names scribe-api scribe-web`) before starting
-  `devops.cd_push_ecr_main`, which `dependsOn` it.
+  `devops.terraform_oidc_github`, and now `devops.terraform_ecr` — all `passing`.
+  `terraform_ecr`'s doc-flip is this session's PR, pending merge; the other four are merged to
+  `main`.
+- `devops.terraform_ecr` — **status discrepancy from prior sessions, RESOLVED this session.**
+  Root cause: PR #11 merged `feat/devops-terraform-ecr` to `main` at its *blocked* commit
+  (`8a35335`), but the remote branch was never deleted and picked up one further, never-merged
+  commit (`be8a00f`, "flip terraform_ecr to passing with real double-push proof") that actually
+  finished the work — 2 more IAM rounds past the original block (`ecr:TagResource`, then
+  `ecr:GetLifecyclePolicy`) — but that commit only ever landed on the stranded branch, never
+  `main`, so `feature-list.json` kept reading `blocked`. Did NOT trust either doc: independently
+  re-verified all 4 acceptance criteria live against AWS this session
+  (`AWS_PROFILE=devops-agent`) — both repos `IMMUTABLE` + `scanOnPush=true`, both lifecycle
+  policies expire untagged images >7 days, and a **fresh** double-push test (pushed a genuinely
+  different image, `alpine:3.18`, to the already-existing `scribe-api:smoke-test-tag` — rejected
+  with ECR's immutability error). `terraform plan` (plan-only, no apply) shows zero drift — both
+  `aws_ecr_repository` and `aws_ecr_lifecycle_policy` resources cleanly tracked in real remote
+  state. Confirmed via git history that both repos were created by a **local** `terraform apply`
+  under `AWS_PROFILE=devops-agent` (not CI — this repo has no `terraform apply` workflow at all
+  yet), matching the same documented Tier-0-bootstrap local-apply exception already used for
+  `terraform_backend`/`terraform_oidc_github`. `devops/feature-list.json` → `passing`, rubric
+  rewritten with today's date and this evidence. Full detail: `devops/progress.md` 2026-08-18
+  entry, `devops/sprint-contract.md`'s reconciliation-sprint section.
 - `devops.terraform_networking_rds` / `devops.terraform_compute_envs` — still `blocked`. Domain
   decided (`test.nimat.dev`), full 3-env rollout (dev/staging/prod) confirmed, but **not yet
   dispatched** — these provision real, ongoing-cost AWS resources (RDS + EC2 running
@@ -57,11 +71,11 @@ actual prerequisites):
 ## Next feature to work
 
 **`devops.cd_push_ecr_main`** (Tier 2) — `dependsOn: ["devops.terraform_ecr",
-"devops.ci_secret_scan", "devops.ci_image_scan_trivy"]`. The latter two are now `passing`;
-`devops.terraform_ecr`'s actual status needs reconciling first (see the discrepancy noted above)
-before this is safely startable — if the real ECR repos exist and are healthy, flip
-`feature-list.json` to match reality and proceed; if they don't, this feature is still genuinely
-blocked on the same IAM gap `devops/manual.md` Step 9 describes.
+"devops.ci_secret_scan", "devops.ci_image_scan_trivy"]`. **All three dependencies are now
+`passing`** (the reconciliation above cleared the last one) — this feature is safely startable.
+Note this session did NOT implement it, only unblocked it; it's still a fresh Tier 2 feature
+needing its own `sprint-contract.md` fill-in, workflow write (push-on-main-only, OIDC auth,
+git-SHA tag, never `latest`), and real verify run.
 
 ## Known gaps
 
