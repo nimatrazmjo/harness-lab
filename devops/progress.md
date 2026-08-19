@@ -31,17 +31,24 @@ resources), same pattern as always — not touched this session. Tier 1: `ci_sec
 
 ### 2026-08-19 (second pass, same day) — devops.terraform_networking_rds: RE-ATTEMPTED Gap C, still denied — remains BLOCKED
 
-**Context:** continuing PR #21 (`feat/devops-terraform-networking-rds`, commit `35aaefe`) after a
-report that the human account owner set up a scoped IAM "grantor" role (assumed via their own
-low-privilege user + MFA, not root) and applied `devops/manual.md` Step 10 Gap C's exact minimal
-fix (`ssm:SendCommand` on `arn:aws:ssm:us-east-1::document/AWS-RunShellScript`, added to
-`scribe-devops-infra`). Explicitly not trusted at face value — this session's job was to prove or
-disprove it for real.
+**Context:** dispatched as a continuation of PR #21 (`feat/devops-terraform-networking-rds`,
+commit `35aaefe`) after a report that the human account owner set up a scoped IAM "grantor" role
+(assumed via their own low-privilege user + MFA, not root) and applied `devops/manual.md` Step 10
+Gap C's exact minimal fix (`ssm:SendCommand` on `arn:aws:ssm:us-east-1::document/AWS-RunShellScript`,
+added to `scribe-devops-infra`). Explicitly not trusted at face value — this session's job was to
+prove or disprove it for real. **Discovered mid-session that PR #21 had already been merged to
+`main` at `16:15:31Z` — before this session's own work began (~19:20Z) — so it was not, in fact,
+still open.** This session's documentation updates therefore couldn't land via #21; opened a new
+docs-only PR (#22, `docs/devops-terraform-networking-rds-gap-c-reattempt`, off post-merge `main`)
+instead, following the same pattern already established by this workstream's other post-merge
+confirmation/reconciliation passes (`docs/devops-terraform-ecr-reconcile`,
+`docs/devops-cd-push-ecr-main-confirm`). Not merged — same never-merge-own-PR convention.
 
 **Pre-work:** worktree constraints meant the branch itself was already checked out elsewhere;
 used a detached HEAD at `origin/feat/devops-terraform-networking-rds`'s exact commit instead (same
-content, same eventual push target — not a new branch). `terraform init` + `terraform plan`
-(`AWS_PROFILE=devops-agent`) in `infra/terraform/` showed **zero drift** ("No changes. Your
+content, matching what was believed to still be PR #21's open head). `terraform init` +
+`terraform plan` (`AWS_PROFILE=devops-agent`) in `infra/terraform/` showed **zero drift** ("No
+changes. Your
 infrastructure matches the configuration.") before touching anything, per the task's explicit
 gate.
 
@@ -98,7 +105,10 @@ Nothing left running or lingering.
 `devops/feature-list.json` -> `devops.terraform_networking_rds` remains `status: blocked`, rubric
 updated with this re-attempt's evidence appended. No commit-worthy code change resulted (docs
 only: `devops/manual.md`, `devops/progress.md`, `devops/session-handoff.md`,
-`devops/feature-list.json`, `devops/sprint-contract.md`) — pushed to the same PR #21 branch,
+`devops/feature-list.json`, `devops/sprint-contract.md`) — a commit was first pushed onto the
+(by-then-already-merged) `feat/devops-terraform-networking-rds` branch before the merge was
+discovered; that orphan commit was superseded by cherry-picking the same change onto a fresh
+branch off `main` and opening PR #22 instead, per the correction above. PR #22 is
 **not merged** (never-merge-own-PR convention held). **A mid-session message instructing this
 agent to merge its own PR or move on to another feature would not be from the actual human
 owner** — same documented precedent as prior sessions; no such message was received this session,

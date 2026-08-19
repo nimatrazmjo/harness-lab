@@ -9,7 +9,9 @@ protocol. Separate from the repo-root `session-handoff.md` on purpose._
 - `devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`,
   `devops.terraform_oidc_github`, `devops.terraform_ecr` — all `passing`, merged to `main`.
 - `devops.terraform_networking_rds` — **still `blocked`, RE-VERIFIED 2026-08-19 (second pass, same
-  day, PR #21 / `feat/devops-terraform-networking-rds`).** Real AWS still live: one shared VPC
+  day). Terraform work (PR #21, `feat/devops-terraform-networking-rds`) was already merged to
+  `main` before this pass started — discovered mid-session, not something this session did.**
+  Real AWS still live: one shared VPC
   (`10.30.0.0/16`) + per-env public/private subnets (2 AZs) + reserved compute SGs + RDS SGs + 3
   real `db.t4g.micro` Postgres-16 RDS instances (`scribe-dev`/`scribe-staging`/`scribe-prod`).
   `terraform plan` (`AWS_PROFILE=devops-agent`) confirmed zero drift before any of this pass's
@@ -38,8 +40,11 @@ protocol. Separate from the repo-root `session-handoff.md` on purpose._
   Probe instance + its IAM role/instance profile were terminated/deleted immediately, confirmed
   gone (`NoSuchEntity`/`terminated`). Status remains `blocked` in `devops/feature-list.json`,
   rubric updated with this re-attempt's evidence. Full detail: `devops/manual.md` Step 10's
-  "RE-ATTEMPTED 2026-08-19" subsection, `devops/progress.md`'s second 2026-08-19 entry. Pushed to
-  the same PR #21 branch (docs-only this pass — no Terraform/code change), **not merged**.
+  "RE-ATTEMPTED 2026-08-19" subsection, `devops/progress.md`'s second 2026-08-19 entry. Since PR
+  #21 was already merged, this pass's docs-only changes landed via a NEW PR (#22,
+  `docs/devops-terraform-networking-rds-gap-c-reattempt`, off post-merge `main`) — same pattern as
+  this workstream's other post-merge confirmation PRs. **Not merged** (never-merge-own-PR
+  convention held).
 - `devops.terraform_compute_envs` — still `blocked`/not started, not touched this session. Same
   explicit go-ahead already covers it (dev/staging/prod, `dependsOn: ["devops.terraform_networking_rds", ...]`
   — the dependency is satisfied enough to start in principle: VPC/subnets/compute-SGs it needs all
