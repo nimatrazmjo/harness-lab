@@ -19,13 +19,107 @@ Tier 0 is done except the two real-AWS items genuinely blocked on a pending scop
 full 3-env (dev/staging/prod) rollout confirmed, but not yet dispatched — real ongoing-cost
 resources, needs explicit go-ahead each time per this workstream's pattern). All of Tier 0's
 other items (`dockerfile_api`, `dockerfile_web`, `terraform_backend`, `terraform_oidc_github`,
-and now `terraform_ecr`, reconciled this session — see log entry below) are `passing` and merged
-(`terraform_ecr`'s doc-flip is on this session's PR, pending merge). Tier 1: `ci_secret_scan`,
-`ci_build_images`, and `ci_image_scan_trivy` are `passing`. `cd_push_ecr_main` (Tier 2) is now
-safely startable — all three of its `dependsOn` are `passing` — nothing in this session touched
-Tier 2 implementation itself, only unblocked it via the reconciliation.
+and now `terraform_ecr`, reconciled earlier this session via PR #18, merged) are `passing` and
+merged. Tier 1: `ci_secret_scan`, `ci_build_images`, `ci_image_scan_trivy` are all `passing` and
+merged. Tier 2: `cd_push_ecr_main` is `in_progress` (built + PR-verified this session, but the
+real push-to-main path is unproven pre-merge — see the log entry below). Next: merge this
+session's PR, watch the first real push-to-main run, then either flip `cd_push_ecr_main` to
+`passing` for real or continue to `devops.cd_deploy_prod_on_main`.
 
 ## Log
+
+### 2026-08-18 — devops.cd_push_ecr_main: in_progress (built + PR-verified, real push unproven pre-merge)
+
+**Dependency reconciliation first (per this session's explicit instructions):** confirmed real
+AWS state directly — `aws ecr describe-repositories --repository-names scribe-api scribe-web`
+shows both repos live, `imageTagMutability: IMMUTABLE`, `scanOnPush: true`. `terraform_ecr` was
+already reconciled to `passing` in PR #18 (`docs/devops-terraform-ecr-reconcile`, see the log
+entry immediately below — that PR merged to `main` partway through this session) — proceeded on
+that basis without merging PR #18 myself (not my PR, not my call).
+
+**What was built:** `.github/workflows/build-images.yml` extended (not a new workflow file — no
+clean way to gate a separate `workflow_run`-triggered file on TWO independent workflows
+(`secret-scan.yml` + this file) both having passed for the exact same commit; GitHub Actions
+`needs:` only works within one file, so folding everything into one `push`-triggered run was the
+only way to get a real, race-free gate):
+- New trigger: `push: branches: [main]` (alongside the existing `pull_request`).
+- New job `secret-scan-main` (`if: github.event_name == 'push' && ... refs/heads/main`) — a
+  deliberate push-only re-run of the same gitleaks check `secret-scan.yml` does on PRs, because
+  this repo merges via real merge commits (confirmed via `git log`, not squash) so the commit
+  that lands on `main` is a NEW SHA the PR's own secret-scan run never scanned directly.
+- New jobs `push-api`/`push-web`, each `needs: [secret-scan-main, build-api|build-web]` with an
+  explicit `if: | always() && github.event_name == 'push' && ... && needs.X.result == 'success'`
+  (deliberately not relying on GitHub's default skip-propagation semantics, which would behave
+  correctly here anyway but explicit is safer and self-documenting) — authenticate via
+  `aws-actions/configure-aws-credentials` to `role-to-assume:
+  arn:aws:iam::404063516240:role/scribe-github-actions-deploy` (confirmed real ARN, region, and
+  ECR repo names by reading `infra/terraform/main.tf`, read-only), log in via
+  `aws-actions/amazon-ecr-login@v2`, then `docker/build-push-action@v6` with `push: true` and
+  `tags: <account>.dkr.ecr.us-east-1.amazonaws.com/scribe-{api,web}:${{ github.sha }}` — the full
+  40-char commit SHA, never `latest`. `cache-from`/`cache-to: type=gha` reuses the exact same
+  cache scope `build-api`/`build-web` just wrote to, so the rebuild-for-push is a near-total
+  cache hit rather than a cold rebuild.
+
+**Real verification run, in order:**
+1. `grep -n 'latest' .github/workflows/build-images.yml` — 8 matches, all comment prose
+   ("never `latest`") or `runs-on: ubuntu-latest`; zero as an actual tag value.
+2. `grep -n 'AWS_ACCESS_KEY_ID\|AWS_SECRET_ACCESS_KEY'` — zero matches.
+3. `actionlint .github/workflows/build-images.yml` and full-repo `actionlint` — both clean, exit
+   0.
+4. `aws iam get-role-policy --role-name scribe-github-actions-deploy --policy-name
+   scribe-github-actions-deploy-permissions` (`AWS_PROFILE=devops-agent`) — **devops-agent could
+   read this** (contrary to the documented gap from earlier sessions where IAM self-inspection
+   was denied) — confirmed the LIVE policy already grants exactly `ecr:PutImage` /
+   `InitiateLayerUpload` / `UploadLayerPart` / `CompleteLayerUpload` /
+   `BatchCheckLayerAvailability` / `GetAuthorizationToken` scoped to
+   `arn:aws:ecr:us-east-1:404063516240:repository/{scribe-api,scribe-web}`, and `aws iam get-role`
+   confirmed the trust policy's `sub` `StringLike` condition includes
+   `repo:nimatrazmjo@3712526/harness-lab@1332166375:ref:refs/heads/main` — the exact claim a real
+   push-to-main OIDC token will present. This is real (if indirect) evidence the role is
+   correctly provisioned for what this workflow asks of it.
+5. Real end-to-end ECR push dry-run using the **`devops-agent` principal** (explicitly NOT the
+   OIDC role — a real OIDC token exchange can only happen inside an actual GitHub Actions run,
+   not locally, so this is a proxy for "does the registry/tag mechanics work", not proof of the
+   role's own path): `aws ecr get-login-password | docker login` → succeeded; `docker push
+   .../scribe-api:manual-dryrun-devopsagent-39b18c4` (tagged from the already-local
+   `scribe-api:local` image, short SHA of the commit this branch was cut from in the tag name for
+   traceability) → succeeded; `aws ecr describe-images --image-ids
+   imageTag=manual-dryrun-devopsagent-39b18c4` → confirmed present with a real `imagePushedAt`.
+   Re-pushing the identical digest to the same tag also succeeded — this is expected ECR
+   behavior (immutability blocks a tag pointing at a DIFFERENT image, not a no-op re-push of the
+   same digest) and is not a re-proof of immutability — that was already proven for real by
+   `devops.terraform_ecr`'s own genuine-content double-push test, not repeated here. Local
+   dry-run tag removed (`docker rmi`) afterward; could NOT delete the pushed ECR image itself —
+   `devops-agent` lacks `ecr:BatchDeleteImage` (same known, already-documented gap as the
+   pre-existing `scribe-api:smoke-test-tag` leftover from `terraform_ecr`'s own verification) —
+   harmless, not worth a dedicated IAM round.
+6. Opened the real feature PR (`feat/devops-cd-push-ecr-main`) — its `pull_request`-triggered
+   run confirms `build-api`/`build-web` (and the separate `secret-scan.yml` PR check) still pass
+   unchanged, and that `secret-scan-main`/`push-api`/`push-web` correctly show as **skipped**
+   (not run, not failed) on a PR event — proving the push-to-main gating doesn't leak onto PRs.
+
+**What could NOT be verified pre-merge, stated plainly rather than faked:** the feature's own
+literal `verify` commands (`aws ecr describe-images --repository-name scribe-api --image-ids
+imageTag=<sha>` after a REAL push-to-main, and `aws ecr list-images ... | grep -v latest`
+confirming no `latest` tag exists in the repo) require an actual merge commit to go through the
+new `push`/`secret-scan-main`/`push-api`/`push-web` path — that hasn't happened yet (this PR is
+not merged, per this workstream's "never merge own PR" rule), and the dry-run above used a
+different IAM principal and a fabricated tag name, not the OIDC role or a real merge SHA. Status
+left `in_progress` in `devops/feature-list.json`, not `passing` — the workflow is built and as
+verified as it can be pre-merge, but the actual ECR-push-on-merge behavior is genuinely unproven.
+
+**Invariants held:** no static AWS credentials in the workflow (OIDC only, confirmed by grep + a
+real `aws iam get-role-policy` read of the actual live role); no `latest` tag anywhere; no-touch
+zone respected (`git diff --stat` confirms only `.github/workflows/build-images.yml` +
+`devops/*` bookkeeping files changed); no `terraform apply` run. Branch
+`feat/devops-cd-push-ecr-main`, PR opened, **not merged**.
+
+**Next action for a human:** merge this session's PR (`feat/devops-cd-push-ecr-main`), then watch
+the very first real push-to-main run of `build-images.yml` — confirm `secret-scan-main` →
+`build-api`/`build-web` → `push-api`/`push-web` all go green in sequence, then run this feature's
+literal `verify` commands for real (`aws ecr describe-images --repository-name scribe-api
+--image-ids imageTag=<merge-commit-sha>` and the `list-images | grep -v latest` check) before
+flipping `status` to `passing`.
 
 ### 2026-08-18 — devops.terraform_ecr: status reconciliation, blocked -> passing (docs-only sprint)
 

@@ -229,7 +229,7 @@
             "id": "devops.cd_push_ecr_main",
             "tier": 2,
             "title": "CD: push SHA-tagged images to ECR on merge to main",
-            "status": "failing",
+            "status": "in_progress",
             "description": "On merge to main only (never on a PR build), after devops.ci_secret_scan + devops.ci_image_scan_trivy are both green: authenticate to AWS via OIDC (devops.terraform_oidc_github), build, tag with the immutable git SHA, push to ECR (devops.terraform_ecr). `latest` is never used as a tag anywhere in this pipeline.",
             "acceptance": [
                 "Push only triggers on push-to-main, gated on the secret-scan and image-scan jobs having passed for that commit.",
@@ -242,7 +242,7 @@
                 "aws ecr list-images --repository-name scribe-api --query 'imageIds[].imageTag' | grep -v latest  # 'latest' must not appear"
             ],
             "dependsOn": ["devops.terraform_ecr", "devops.ci_secret_scan", "devops.ci_image_scan_trivy"],
-            "rubric": "DevOps: CD — immutable artifact publishing"
+            "rubric": "DevOps: CD — immutable artifact publishing. In progress 2026-08-18: `.github/workflows/build-images.yml` extended with a `push: branches: [main]` trigger, a push-only `secret-scan-main` job, and two push-only `push-api`/`push-web` jobs (each `needs: [secret-scan-main, build-*]` with an explicit success-checking `if:`), authenticating via `aws-actions/configure-aws-credentials` to role `scribe-github-actions-deploy` (OIDC only, zero static keys) and pushing `${{ github.sha }}`-tagged images (never `latest`) via `aws-actions/amazon-ecr-login` + `docker/build-push-action`. `actionlint` clean; grep confirms no `latest` tag value and no AWS_ACCESS_KEY_ID/SECRET anywhere. Real AWS evidence gathered pre-merge: `aws iam get-role-policy` confirms the live OIDC role's policy already grants the exact ECR push actions scoped to scribe-api/scribe-web, and its trust policy's sub condition matches a real push-to-main event; a separate `devops-agent`-principal dry-run push (`docker login`+`push`+`describe-images`) proves the ECR registry mechanics work end-to-end (NOT equivalent proof of the OIDC role's own path — different principal). PR opened for `feat/devops-cd-push-ecr-main`, confirming the PR-triggered build-api/build-web/secret-scan jobs still pass and the new push-only jobs correctly skip on a PR event. The feature's own literal `verify` commands (real `aws ecr describe-images imageTag=<sha>` after a real push-to-main) CANNOT run until this actually merges — status left `in_progress`, not `passing`, until a human confirms the first real push-to-main run succeeds and lands a SHA-tagged image in ECR."
         },
         {
             "id": "devops.cd_deploy_prod_on_main",

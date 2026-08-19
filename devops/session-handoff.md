@@ -8,9 +8,8 @@ protocol. Separate from the repo-root `session-handoff.md` on purpose._
 **Tier 0** — done except two items genuinely blocked on a pending scope decision, not a
 technical/IAM issue:
 - `devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`,
-  `devops.terraform_oidc_github`, and now `devops.terraform_ecr` — all `passing`.
-  `terraform_ecr`'s doc-flip is this session's PR, pending merge; the other four are merged to
-  `main`.
+  `devops.terraform_oidc_github`, and now `devops.terraform_ecr` — all `passing`, all merged to
+  `main` (`terraform_ecr`'s reconciliation PR #18 merged during this session).
 - `devops.terraform_ecr` — **status discrepancy from prior sessions, RESOLVED this session.**
   Root cause: PR #11 merged `feat/devops-terraform-ecr` to `main` at its *blocked* commit
   (`8a35335`), but the remote branch was never deleted and picked up one further, never-merged
@@ -72,10 +71,39 @@ actual prerequisites):
 
 **`devops.cd_push_ecr_main`** (Tier 2) — `dependsOn: ["devops.terraform_ecr",
 "devops.ci_secret_scan", "devops.ci_image_scan_trivy"]`. **All three dependencies are now
-`passing`** (the reconciliation above cleared the last one) — this feature is safely startable.
-Note this session did NOT implement it, only unblocked it; it's still a fresh Tier 2 feature
-needing its own `sprint-contract.md` fill-in, workflow write (push-on-main-only, OIDC auth,
-git-SHA tag, never `latest`), and real verify run.
+`passing`** (`devops.terraform_ecr` merged to `main` via PR #18 this session, ahead of this
+entry's own work) — this feature was picked up in the same session. **`in_progress`**, not yet
+`passing`.
+Reconciled `devops.terraform_ecr`'s dependency for real (`aws ecr describe-repositories` — both
+repos live, `IMMUTABLE`, `scanOnPush: true`) and proceeded on that basis without merging PR #18
+(not mine to merge). Built `.github/workflows/build-images.yml` extensions: `push: branches:
+[main]` trigger, a push-only `secret-scan-main` job, and `push-api`/`push-web` jobs
+(`needs:`-gated on `secret-scan-main` + their respective build job, explicit success-checking
+`if:`) that authenticate via OIDC (`role-to-assume: arn:aws:iam::404063516240:role/scribe-github-
+actions-deploy`) and push `${{ github.sha }}`-tagged images (never `latest`) to ECR via
+`aws-actions/amazon-ecr-login` + `docker/build-push-action`.
+
+Verified everything that's verifiable pre-merge: `actionlint` clean, grep confirms no `latest`
+tag value / no static AWS creds, `aws iam get-role-policy` on the real live OIDC role confirms
+its policy already grants exactly the ECR push actions this workflow needs (scoped to
+scribe-api/scribe-web) and its trust policy matches a real push-to-main token claim, a
+`devops-agent`-principal dry-run push proved the ECR registry/tag mechanics work end-to-end
+(different principal, not equivalent proof of the OIDC role's own path), and the PR's own
+`pull_request` run confirmed `build-api`/`build-web` still pass unchanged while
+`secret-scan-main`/`push-api`/`push-web` correctly skip on a PR event. **Could NOT verify**: the
+feature's own literal `verify` commands (a real `aws ecr describe-images imageTag=<sha>` after an
+actual push-to-main) — that requires a real merge, which didn't happen this session (never merge
+own PR). Left `status: in_progress` in `devops/feature-list.json`, not faked `passing`. Branch
+`feat/devops-cd-push-ecr-main`, PR opened, not merged. Full detail: `devops/progress.md`'s
+2026-08-18 entry.
+
+**For the next session / a human:** merge PR #18 (`docs/devops-terraform-ecr-reconcile`) and this
+session's PR, then watch the FIRST real push-to-main run of `build-images.yml` end-to-end
+(`secret-scan-main` → `build-api`/`build-web` → `push-api`/`push-web` all green), then run the
+literal `verify` commands for real before flipping this feature to `passing`. After that:
+`devops.cd_deploy_prod_on_main` (dependsOn this feature + `terraform_compute_envs`, which is
+still blocked on the dev/staging/prod go-ahead — so that Tier 2 item can't fully proceed yet
+either way).
 
 ## Known gaps
 
