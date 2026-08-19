@@ -4,11 +4,12 @@
         "version": "1.0.0",
         "purpose": "Structured, append-only record of every review cycle run via the review-infra skill. Distinct from devops/feature-list.json (tracks devops features) and devops-request-grant/feature-list.json (tracks IAM grants) — this file tracks review cycles specifically. Schema and procedure shared across review-api/review-web/review-infra/review-harness — see .claude/skills/review-shared/PROCEDURE.md.",
         "howToUse": [
-            "Append a new entry, status 'reviewing', before starting a cycle.",
+            "Append a new entry: status 'requested' if just logging pending work, or 'reviewing' if starting both passes immediately.",
             "Move through fixing -> re_reviewing -> awaiting_merge_approval as the cycle progresses.",
             "Never set 'merged' yourself unless a human has confirmed the merge actually happened — this skill never runs `gh pr merge`."
         ],
         "statusLegend": {
+            "requested": "Pending work identified/logged, cycle not yet actively started.",
             "reviewing": "Both passes (code-review + harness-compliance) in progress.",
             "fixing": "Real issues found, being fixed.",
             "re_reviewing": "Fixes pushed, re-verifying against the real remote branch.",

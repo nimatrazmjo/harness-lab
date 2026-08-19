@@ -25,5 +25,9 @@ run the **Leave clean** gate before ending or handing off (i.e. before stopping 
 - [ ] Shared `cleanup.sh` run.
 - [ ] `session-handoff.md` overwritten, `progress.md` has a new dated entry.
 - [ ] `graph.md` regenerated if any entry's `status`/`reviewedTarget` changed.
-- [ ] **The PR was NOT merged.** Confirm this explicitly — it's the one gate that must never be
-      silently skipped in the other direction.
+- [ ] **If this cycle did not just record a human-confirmed merge (PROCEDURE.md step 9's one
+      legitimate exception), the PR was NOT merged by this session.** Confirm this explicitly —
+      it's the gate that must never be silently skipped in the wrong direction. If you ARE
+      recording a merge this session, confirm it was a real, human-performed merge you verified
+      independently (`gh pr view --json state,mergedAt`) — never one this skill performed
+      itself.

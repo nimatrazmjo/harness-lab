@@ -18,16 +18,20 @@ harness-compliance pass (defined per-domain in each `SKILL.md`).
 
 0. **Gate + orient.** Run the domain's own `init.sh`. Read its `session-handoff.md` and
    `feature-list.json` (the review-cycle log — see schema below). If invoked with nothing named
-   and every tracked cycle is already terminal (`merged`/`no_issues_found`), that's a clean
-   no-op — report it and stop (loop-compatible, same discipline as `devops-request-grant`).
+   and every tracked cycle is already in one of the three states that mean "nothing for an
+   automated invocation to do" — `merged`, `no_issues_found`, or `awaiting_merge_approval`
+   (done, correctly blocked on a human, not on this skill) — that's a clean no-op: report it and
+   stop (loop-compatible, same discipline as `devops-request-grant`). Only `reviewing`/`fixing`/
+   `re_reviewing` mean a cycle is actually mid-flight and needs resuming.
 
 1. **Determine the target.** If the user named a PR/branch, use it. Otherwise look for the
    domain's own pending work: an un-PR'd branch touching its scope paths, or an open PR without
    a completed cycle logged. If nothing's pending, no-op.
 
-2. **Append a `feature-list.json` entry**, status `reviewing`, before touching anything — this
-   file IS the audit trail for review cycles, same role `devops-request-grant/feature-list.json`
-   plays for grants.
+2. **Append a `feature-list.json` entry** before touching anything — this file IS the audit
+   trail for review cycles, same role `devops-request-grant/feature-list.json` plays for grants.
+   Status `requested` if you're just logging pending work you've noticed but aren't starting on
+   yet; status `reviewing` if you're beginning both passes immediately in the same session.
 
 3. **Ensure the target is a real PR.** If the work isn't committed/pushed/PR'd yet, do that first
    (branch + PR per this repo's existing conventions — conventional commit message, PR body with
@@ -74,7 +78,7 @@ Each entry is one review cycle:
 ```json
 {
   "id": "review-<domain>-YYYY-MM-DD-NN-<short-slug>",
-  "status": "reviewing | fixing | re_reviewing | awaiting_merge_approval | merged | no_issues_found",
+  "status": "requested | reviewing | fixing | re_reviewing | awaiting_merge_approval | merged | no_issues_found",
   "title": "short human title",
   "description": "what's being reviewed and why",
   "prUrl": "https://github.com/.../pull/N",
