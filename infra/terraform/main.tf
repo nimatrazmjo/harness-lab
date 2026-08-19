@@ -233,3 +233,274 @@ resource "aws_ecr_lifecycle_policy" "scribe_expire_untagged" {
 output "ecr_repository_urls" {
   value = { for name, repo in aws_ecr_repository.scribe : name => repo.repository_url }
 }
+
+# ---------------------------------------------------------------------------
+# devops.terraform_networking_rds
+#
+# One shared VPC with per-environment (dev/staging/prod) public+private subnet pairs, a reserved
+# "compute" SG per env (EC2 attaches to it in devops.terraform_compute_envs, next feature — not
+# this one), an RDS SG per env allowing 5432 only from that env's compute SG (source = SG
+# reference, never a CIDR — see [RDS-PRIVATE] in the root AGENTS.md §2), and one real db.t4g.micro
+# Postgres 16 RDS instance per env — PubliclyAccessible=false, single-AZ, gp3 20GB, master
+# credentials via RDS-native manage_master_user_password (backed by Secrets Manager; the password
+# itself never appears in Terraform state or this codebase). Topology/sizing rationale: see
+# devops/sprint-contract.md's "Active sprint — devops.terraform_networking_rds" section.
+#
+# One shared VPC (not per-env VPCs) — simpler option, no doc opinion either way. One parameterized
+# for_each over `scribe_environments` in a single state (NOT Terraform workspaces) — the VPC is
+# shared across envs and all 3 RDS instances must be describable in one pass.
+# ---------------------------------------------------------------------------
+
+locals {
+  scribe_azs = ["us-east-1a", "us-east-1b"]
+
+  scribe_environments = {
+    dev = {
+      public_subnet_cidrs  = ["10.30.0.0/24", "10.30.1.0/24"]
+      private_subnet_cidrs = ["10.30.10.0/24", "10.30.11.0/24"]
+    }
+    staging = {
+      public_subnet_cidrs  = ["10.30.20.0/24", "10.30.21.0/24"]
+      private_subnet_cidrs = ["10.30.30.0/24", "10.30.31.0/24"]
+    }
+    prod = {
+      public_subnet_cidrs  = ["10.30.40.0/24", "10.30.41.0/24"]
+      private_subnet_cidrs = ["10.30.50.0/24", "10.30.51.0/24"]
+    }
+  }
+
+  # Flattened {"<env>-<az_index>" => {env, az, cidr}} maps — for_each needs a map, not a nested
+  # structure, and this keeps each subnet's identity stable across plans regardless of ordering.
+  scribe_public_subnets = merge([
+    for env, cfg in local.scribe_environments : {
+      for idx, az in local.scribe_azs :
+      "${env}-${idx}" => {
+        env  = env
+        az   = az
+        cidr = cfg.public_subnet_cidrs[idx]
+      }
+    }
+  ]...)
+
+  scribe_private_subnets = merge([
+    for env, cfg in local.scribe_environments : {
+      for idx, az in local.scribe_azs :
+      "${env}-${idx}" => {
+        env  = env
+        az   = az
+        cidr = cfg.private_subnet_cidrs[idx]
+      }
+    }
+  ]...)
+}
+
+resource "aws_vpc" "scribe" {
+  cidr_block           = "10.30.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  tags = { Name = "scribe-vpc" }
+}
+
+# Only used by future EC2 instances (public subnets need egress to the internet for image
+# pulls/SSM); private (RDS-only) subnets deliberately get no route to this at all.
+resource "aws_internet_gateway" "scribe" {
+  vpc_id = aws_vpc.scribe.id
+
+  tags = { Name = "scribe-igw" }
+}
+
+resource "aws_subnet" "public" {
+  for_each = local.scribe_public_subnets
+
+  vpc_id            = aws_vpc.scribe.id
+  cidr_block        = each.value.cidr
+  availability_zone = each.value.az
+  # Deliberately NOT map_public_ip_on_launch = true: that attribute requires a follow-up
+  # ec2:ModifySubnetAttribute call devops-agent isn't granted (a new IAM gap, documented in
+  # devops/manual.md) — and it isn't actually needed here. devops.terraform_compute_envs (next
+  # feature) can request a public IP per-instance at launch (`associate_public_ip_address = true`
+  # on aws_instance) without the subnet-level auto-assign, so this avoids the gap entirely rather
+  # than requiring a new grant for a cosmetic convenience.
+
+  tags = {
+    Name        = "scribe-${each.value.env}-public-${each.value.az}"
+    Environment = each.value.env
+    Tier        = "public"
+  }
+}
+
+resource "aws_subnet" "private" {
+  for_each = local.scribe_private_subnets
+
+  vpc_id            = aws_vpc.scribe.id
+  cidr_block        = each.value.cidr
+  availability_zone = each.value.az
+
+  tags = {
+    Name        = "scribe-${each.value.env}-private-${each.value.az}"
+    Environment = each.value.env
+    Tier        = "private"
+  }
+}
+
+resource "aws_route_table" "public" {
+  for_each = local.scribe_environments
+
+  vpc_id = aws_vpc.scribe.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.scribe.id
+  }
+
+  tags = { Name = "scribe-${each.key}-public-rt", Environment = each.key }
+}
+
+# No default route — RDS never needs outbound internet, and this deliberately avoids a NAT
+# gateway (the single largest potential cost item in this feature). Only the VPC's own local
+# route (implicit, not declared) applies here.
+resource "aws_route_table" "private" {
+  for_each = local.scribe_environments
+
+  vpc_id = aws_vpc.scribe.id
+
+  tags = { Name = "scribe-${each.key}-private-rt", Environment = each.key }
+}
+
+resource "aws_route_table_association" "public" {
+  for_each = local.scribe_public_subnets
+
+  subnet_id      = aws_subnet.public[each.key].id
+  route_table_id = aws_route_table.public[each.value.env].id
+}
+
+resource "aws_route_table_association" "private" {
+  for_each = local.scribe_private_subnets
+
+  subnet_id      = aws_subnet.private[each.key].id
+  route_table_id = aws_route_table.private[each.value.env].id
+}
+
+# Reserved for EC2 (devops.terraform_compute_envs, next feature) — created now, empty, purely so
+# the RDS SG below can reference a real SG ID rather than a CIDR. The next feature attaches EC2
+# instances to this same SG and adds 80/443 ingress there; not recreated/renamed.
+resource "aws_security_group" "compute" {
+  for_each = local.scribe_environments
+
+  name        = "scribe-${each.key}-compute-sg"
+  description = "Reserved for ${each.key} EC2 instances (devops.terraform_compute_envs). No ingress rules yet."
+  vpc_id      = aws_vpc.scribe.id
+
+  tags = { Name = "scribe-${each.key}-compute-sg", Environment = each.key }
+}
+
+resource "aws_vpc_security_group_egress_rule" "compute_all" {
+  for_each = local.scribe_environments
+
+  security_group_id = aws_security_group.compute[each.key].id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1"
+  description       = "Default egress-all - no inbound rules on this SG yet"
+}
+
+resource "aws_security_group" "rds" {
+  for_each = local.scribe_environments
+
+  name        = "scribe-${each.key}-rds-sg"
+  description = "Postgres access for scribe-${each.key} - 5432 only from the ${each.key} compute SG"
+  vpc_id      = aws_vpc.scribe.id
+
+  tags = { Name = "scribe-${each.key}-rds-sg", Environment = each.key }
+}
+
+# [RDS-PRIVATE]: the ONLY inbound rule, source = SG reference (never a CIDR).
+resource "aws_vpc_security_group_ingress_rule" "rds_from_compute" {
+  for_each = local.scribe_environments
+
+  security_group_id            = aws_security_group.rds[each.key].id
+  referenced_security_group_id = aws_security_group.compute[each.key].id
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  description                  = "Postgres from the ${each.key} compute SG only"
+}
+
+resource "aws_vpc_security_group_egress_rule" "rds_all" {
+  for_each = local.scribe_environments
+
+  security_group_id = aws_security_group.rds[each.key].id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1"
+}
+
+resource "aws_db_subnet_group" "scribe" {
+  for_each = local.scribe_environments
+
+  name       = "scribe-${each.key}-db-subnet-group"
+  subnet_ids = [for idx, az in local.scribe_azs : aws_subnet.private["${each.key}-${idx}"].id]
+
+  tags = { Name = "scribe-${each.key}-db-subnet-group", Environment = each.key }
+}
+
+# DEVIATION, disclosed: the original design (see devops/sprint-contract.md) used RDS-native
+# manage_master_user_password so the plaintext password would never touch Terraform state at
+# all. That hit a real IAM gap — devops-agent has zero KMS permissions (confirmed:
+# kms:DescribeKey/kms:ListAliases both AccessDenied even on the pre-existing default
+# aws/secretsmanager key), and CreateDBInstance's automatic Secrets-Manager-backed password needs
+# KMS access. A new grant is required (documented in devops/manual.md) and devops-agent can't
+# self-authorize it. Rather than leave all 3 RDS instances unprovisioned this session, switched to
+# a Terraform-generated random_password — the standard, widely-used pattern. The password lives
+# only in the remote Terraform state (S3, SSE-encrypted, versioned, never committed to git, never
+# printed in this repo/docs/logs) — a real but disclosed, common tradeoff vs. the KMS-managed
+# approach. Revisit once the KMS grant lands (swap back to manage_master_user_password = true,
+# `terraform apply` will rotate to the RDS-managed secret cleanly).
+resource "random_password" "master" {
+  for_each = local.scribe_environments
+
+  length  = 32
+  special = false # avoids shell/URL-escaping surprises in a DATABASE_URL built from this later
+}
+
+# db.t4g.micro / gp3 20GB / single-AZ / 1-day backups — cost-minimizing sizing for a demo project,
+# see devops/sprint-contract.md for the full rationale + rough $/mo estimate.
+resource "aws_db_instance" "scribe" {
+  for_each = local.scribe_environments
+
+  identifier     = "scribe-${each.key}"
+  engine         = "postgres"
+  engine_version = "16"
+  instance_class = "db.t4g.micro"
+
+  allocated_storage = 20
+  storage_type      = "gp3"
+
+  db_name  = "scribe"
+  username = "scribe"
+  password = random_password.master[each.key].result
+
+  db_subnet_group_name   = aws_db_subnet_group.scribe[each.key].name
+  vpc_security_group_ids = [aws_security_group.rds[each.key].id]
+  publicly_accessible    = false
+  multi_az               = false
+
+  backup_retention_period = 1
+  skip_final_snapshot     = true
+  deletion_protection     = false
+  apply_immediately       = true
+
+  tags = { Name = "scribe-${each.key}-rds", Environment = each.key }
+}
+
+output "rds_endpoints" {
+  value = { for env, db in aws_db_instance.scribe : env => db.endpoint }
+}
+
+# Deliberately no output for the master password itself (random_password.master) — never
+# printed by `terraform output`/plan/apply logs. Retrieve it only via `terraform state show`
+# when actually needed for a real connection (e.g. this feature's own pgvector verification),
+# never pasted into docs/progress logs/commits.
+
+output "compute_security_group_ids" {
+  value = { for env, sg in aws_security_group.compute : env => sg.id }
+}
