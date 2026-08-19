@@ -21,12 +21,54 @@ resources, needs explicit go-ahead each time per this workstream's pattern). All
 other items (`dockerfile_api`, `dockerfile_web`, `terraform_backend`, `terraform_oidc_github`,
 and now `terraform_ecr`, reconciled earlier this session via PR #18, merged) are `passing` and
 merged. Tier 1: `ci_secret_scan`, `ci_build_images`, `ci_image_scan_trivy` are all `passing` and
-merged. Tier 2: `cd_push_ecr_main` is `in_progress` (built + PR-verified this session, but the
-real push-to-main path is unproven pre-merge — see the log entry below). Next: merge this
-session's PR, watch the first real push-to-main run, then either flip `cd_push_ecr_main` to
-`passing` for real or continue to `devops.cd_deploy_prod_on_main`.
+merged. Tier 2: `cd_push_ecr_main` is now **`passing`, fully proven** — PR #19 merged (by the
+human owner), the first real push-to-main run went green end-to-end, and all three literal
+`verify` commands succeeded against the real merge-commit SHA (see log entry below). Next:
+`devops.cd_deploy_prod_on_main` (Tier 2, `dependsOn: [cd_push_ecr_main, terraform_compute_envs]`
+— the latter is still blocked on the dev/staging/prod go-ahead, so that feature can't fully
+proceed either way yet).
 
 ## Log
+
+### 2026-08-18 — devops.cd_push_ecr_main: passing — confirmed via the FIRST real push-to-main run
+
+PR #19 merged to `main` by the human owner (not self-merged — the workstream's "never merge own
+PR" rule held; the merge itself was out of this agent's hands). This produced the very first real
+push-to-main event against the new `build-images.yml` jobs, merge commit
+`9bba1f2c2920fdd9908d2b1d1207854441037717`.
+
+**Real CI run, watched live via the GitHub API (`gh api .../actions/runs/32210026643/jobs`),
+all green in the correct order:**
+- `secret-scan-main`: success, 10s
+- `build-api`: success, ~1.5min (includes the existing Trivy CRITICAL/HIGH image-scan gate)
+- `build-web`: success, ~1.5min (same)
+- `push-api`: success, started only after `build-api` finished
+- `push-web`: success, started only after `build-web` finished
+- Overall run conclusion: `success`
+
+**All three literal `verify` commands then run for real against the exact merge SHA
+(`AWS_PROFILE=devops-agent`):**
+1. `aws ecr describe-images --repository-name scribe-api --image-ids
+   imageTag=9bba1f2c2920fdd9908d2b1d1207854441037717` → succeeded, real `imagePushedAt`
+   (`1787108006.584`) and real size (93,739,700 bytes).
+2. Same for `scribe-web` → succeeded, real `imagePushedAt` (`1787107983.8`), real size
+   (23,112,458 bytes).
+3. `aws ecr list-images --repository-name scribe-api --query 'imageIds[].imageTag'` →
+   `smoke-test-tag`, the real merge SHA, and the pre-merge dry-run tag
+   (`manual-dryrun-devopsagent-39b18c4`) — zero occurrences of `latest`. Same command against
+   `scribe-web` → only the merge-SHA tag, also zero `latest`.
+
+This is the actual proof this feature's own `sprint-contract.md`/`feature-list.json` said was
+missing pre-merge — not a re-statement of the pre-merge dry-run (which used a different IAM
+principal and a fabricated tag). `devops/feature-list.json` → `devops.cd_push_ecr_main`
+`passing`, rubric rewritten with this real evidence. Docs-only branch
+`docs/devops-cd-push-ecr-main-confirm` (off the post-merge `main`), PR opened, **not merged** —
+this bookkeeping-only change still follows the same never-merge-own-PR convention as everything
+else in this workstream.
+
+**Invariants held:** no AWS resources modified by this confirmation pass (read-only `describe-
+images`/`list-images` calls only); no static credentials introduced; no-touch zone respected
+(only `devops/*` bookkeeping files changed).
 
 ### 2026-08-18 — devops.cd_push_ecr_main: in_progress (built + PR-verified, real push unproven pre-merge)
 

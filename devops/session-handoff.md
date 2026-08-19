@@ -69,41 +69,35 @@ actual prerequisites):
 
 ## Next feature to work
 
-**`devops.cd_push_ecr_main`** (Tier 2) — `dependsOn: ["devops.terraform_ecr",
-"devops.ci_secret_scan", "devops.ci_image_scan_trivy"]`. **All three dependencies are now
-`passing`** (`devops.terraform_ecr` merged to `main` via PR #18 this session, ahead of this
-entry's own work) — this feature was picked up in the same session. **`in_progress`**, not yet
-`passing`.
-Reconciled `devops.terraform_ecr`'s dependency for real (`aws ecr describe-repositories` — both
-repos live, `IMMUTABLE`, `scanOnPush: true`) and proceeded on that basis without merging PR #18
-(not mine to merge). Built `.github/workflows/build-images.yml` extensions: `push: branches:
+**`devops.cd_push_ecr_main`** (Tier 2) — **`passing`, fully proven this session.**
+`dependsOn: ["devops.terraform_ecr", "devops.ci_secret_scan", "devops.ci_image_scan_trivy"]`, all
+three `passing`/merged. Built `.github/workflows/build-images.yml` extensions: `push: branches:
 [main]` trigger, a push-only `secret-scan-main` job, and `push-api`/`push-web` jobs
 (`needs:`-gated on `secret-scan-main` + their respective build job, explicit success-checking
 `if:`) that authenticate via OIDC (`role-to-assume: arn:aws:iam::404063516240:role/scribe-github-
 actions-deploy`) and push `${{ github.sha }}`-tagged images (never `latest`) to ECR via
 `aws-actions/amazon-ecr-login` + `docker/build-push-action`.
 
-Verified everything that's verifiable pre-merge: `actionlint` clean, grep confirms no `latest`
-tag value / no static AWS creds, `aws iam get-role-policy` on the real live OIDC role confirms
-its policy already grants exactly the ECR push actions this workflow needs (scoped to
-scribe-api/scribe-web) and its trust policy matches a real push-to-main token claim, a
-`devops-agent`-principal dry-run push proved the ECR registry/tag mechanics work end-to-end
-(different principal, not equivalent proof of the OIDC role's own path), and the PR's own
-`pull_request` run confirmed `build-api`/`build-web` still pass unchanged while
-`secret-scan-main`/`push-api`/`push-web` correctly skip on a PR event. **Could NOT verify**: the
-feature's own literal `verify` commands (a real `aws ecr describe-images imageTag=<sha>` after an
-actual push-to-main) — that requires a real merge, which didn't happen this session (never merge
-own PR). Left `status: in_progress` in `devops/feature-list.json`, not faked `passing`. Branch
-`feat/devops-cd-push-ecr-main`, PR opened, not merged. Full detail: `devops/progress.md`'s
-2026-08-18 entry.
+Verified everything possible pre-merge (`actionlint` clean, grep confirms no `latest`/static
+creds, a real read of the live OIDC role's policy, a `devops-agent`-principal ECR push dry-run,
+PR #19's own checks confirming the new push-only jobs correctly skip on a PR event), then PR #19
+was merged by the human owner — producing the FIRST real push-to-main run
+(merge commit `9bba1f2c2920fdd9908d2b1d1207854441037717`). Watched it live via the GitHub API:
+`secret-scan-main` → `build-api`/`build-web` → `push-api`/`push-web` all green in the correct
+order. Then ran all three literal `verify` commands for real against that exact merge SHA:
+`aws ecr describe-images` succeeded for both `scribe-api` and `scribe-web` (real
+`imagePushedAt`/size), and `aws ecr list-images` on both repos confirmed zero `latest` tags.
+`devops/feature-list.json` → `passing`, rubric rewritten with this real post-merge evidence.
+Docs-only branch `docs/devops-cd-push-ecr-main-confirm`, PR opened, not merged (same
+never-merge-own-PR convention). Full detail: `devops/progress.md`'s 2026-08-18 entries (two: the
+build/PR-verify entry, and this confirmation entry).
 
-**For the next session / a human:** merge PR #18 (`docs/devops-terraform-ecr-reconcile`) and this
-session's PR, then watch the FIRST real push-to-main run of `build-images.yml` end-to-end
-(`secret-scan-main` → `build-api`/`build-web` → `push-api`/`push-web` all green), then run the
-literal `verify` commands for real before flipping this feature to `passing`. After that:
-`devops.cd_deploy_prod_on_main` (dependsOn this feature + `terraform_compute_envs`, which is
-still blocked on the dev/staging/prod go-ahead — so that Tier 2 item can't fully proceed yet
-either way).
+**For the next session / a human:** merge the small docs-only confirmation PR
+(`docs/devops-cd-push-ecr-main-confirm`) — no code change, just the status flip + evidence — then
+move on to `devops.cd_deploy_prod_on_main` (Tier 2, `dependsOn: [cd_push_ecr_main,
+terraform_compute_envs]` — the latter is still blocked on the dev/staging/prod go-ahead, so full
+progress on that feature needs that decision first; the SSM/deploy-workflow half could still be
+scaffolded and unit-verified ahead of it if useful).
 
 ## Known gaps
 

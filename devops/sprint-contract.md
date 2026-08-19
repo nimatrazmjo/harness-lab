@@ -1,6 +1,39 @@
 # Sprint Contract — DevOps / CI-CD workstream
 
-## Active sprint — devops.cd_push_ecr_main (2026-08-18)
+## Sprint outcome — devops.cd_push_ecr_main (2026-08-18) — PASSING, confirmed post-merge
+
+PR #19 merged to `main` by the human owner (never self-merged, per this workstream's rule).
+This produced the first real push-to-main run against the new `build-images.yml` jobs, merge
+commit `9bba1f2c2920fdd9908d2b1d1207854441037717` — watched live via the GitHub API:
+`secret-scan-main` (success, 10s) → `build-api`/`build-web` (success, ~1.5min each, includes the
+existing Trivy image-scan gate) → `push-api`/`push-web` (success, started only after their
+respective build job finished). Overall run conclusion: `success`.
+
+**All three literal `verify` commands then run for real against that exact merge SHA**
+(previously marked `[ ]` below as "cannot run pre-merge" — now real, all `[x]`):
+- `aws ecr describe-images --repository-name scribe-api --image-ids
+  imageTag=9bba1f2c2920fdd9908d2b1d1207854441037717` → succeeded, real `imagePushedAt`
+  (`1787108006.584`), real size (93,739,700 bytes).
+- Same for `scribe-web` → succeeded, real `imagePushedAt` (`1787107983.8`), real size
+  (23,112,458 bytes).
+- `aws ecr list-images --repository-name scribe-api --query 'imageIds[].imageTag'` →
+  `smoke-test-tag`, the real merge SHA, and the pre-merge dry-run tag — zero `latest`. Same for
+  `scribe-web` → only the merge-SHA tag, zero `latest`.
+
+`devops/feature-list.json` → `devops.cd_push_ecr_main` `passing`, rubric rewritten with this
+real post-merge evidence. Docs-only branch `docs/devops-cd-push-ecr-main-confirm` (off the
+post-merge `main`), PR opened, not merged. Full detail: `devops/progress.md`'s two 2026-08-18
+entries for this feature (build/PR-verify, then this confirmation).
+
+Everything below this line is the **original contract**, filled in before coding started —
+kept verbatim as the record of what was planned and verified pre-merge; the two `[ ]` items in
+its Verification plan and Definition of done are the ones this outcome section above closed out.
+
+---
+
+## Superseded — original Active-sprint contract for devops.cd_push_ecr_main, filled in before
+coding (kept for the concrete approach and pre-merge verification record; see "Sprint outcome"
+above for the real post-merge proof)
 
 **Feature:** `devops.cd_push_ecr_main` (Tier 2), `dependsOn: ["devops.terraform_ecr",
 "devops.ci_secret_scan", "devops.ci_image_scan_trivy"]`. `terraform_ecr`'s real AWS state
