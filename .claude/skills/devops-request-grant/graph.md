@@ -50,7 +50,7 @@ python3 scripts/generate-feature-graph.py \
 
 ### Grant requests -> unblocked devops features
 
-_1 grant entries._
+_1 entries._
 
 ```mermaid
 flowchart LR
