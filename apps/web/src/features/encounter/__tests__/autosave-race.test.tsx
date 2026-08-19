@@ -169,4 +169,36 @@ describe("EncounterWorkspacePage autosave race guard", () => {
     expect(screen.queryByText("stale flag")).not.toBeInTheDocument();
     expect(screen.getByText("fresh flag")).toBeInTheDocument();
   });
+
+  it("never lets a slow mount-time red-flags fetch overwrite a fresher edit-triggered one", async () => {
+    let resolveMount: ((v: unknown) => void) | undefined;
+    mockGetRedFlags.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveMount = resolve;
+        }),
+    );
+    mockGetRedFlags.mockResolvedValueOnce([{ id: "edit", term: "edit", message: "edit flag" }]);
+    mockUpdateInput.mockResolvedValue(ENCOUNTER);
+
+    renderWorkspace();
+    await flush();
+
+    const textarea = screen.getByLabelText(/encounter transcript/i);
+    fireEvent.change(textarea, { target: { value: "A" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+    // The edit-triggered fetch (seq 1) has resolved and rendered its flag.
+    expect(screen.getByText("edit flag")).toBeInTheDocument();
+
+    // The slow mount fetch (seq 0) finally resolves — it must not clobber the newer state.
+    await act(async () => {
+      resolveMount?.([{ id: "mount", term: "mount", message: "mount flag" }]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("mount flag")).not.toBeInTheDocument();
+    expect(screen.getByText("edit flag")).toBeInTheDocument();
+  });
 });

@@ -45,8 +45,12 @@ export function EncounterWorkspacePage() {
       setTranscript(e.transcript ?? "");
       setTemplateId(e.templateId ?? undefined);
     });
-    // Advisory only, computed independently of generation (pioneer.red_flags).
-    encountersApi.getRedFlags(encounterId).then(setRedFlags);
+    // Advisory only, computed independently of generation (pioneer.red_flags). Tagged as seq 0
+    // so a fresher edit-triggered fetch (seq >= 1) always wins if this mount fetch is slow and
+    // resolves after the user has already started typing.
+    encountersApi.getRedFlags(encounterId).then((flags) => {
+      if (inputPatchSeq.current === 0) setRedFlags(flags);
+    });
     templatesApi.listActive().then(setTemplates);
     encountersApi.history(encounterId).then(setHistory);
     // Restore any in-progress (not yet saved) note — survives refresh, close/reopen, and a

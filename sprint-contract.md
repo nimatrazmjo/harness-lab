@@ -94,8 +94,12 @@ which keeps the change small and confined to the one file that owns the race.
       both now go through the shared `queueInputUpdate`/`inputPatchChain` in
       `EncounterWorkspacePage.tsx`.
 - [x] No existing test regresses; no new console errors/unhandled rejections — full `pnpm verify`
-      green (13 web test files / 45 tests, up from 12/43) plus `pnpm --filter api run test:e2e`
+      green (13 web test files / 46 tests, up from 12/43) plus `pnpm --filter api run test:e2e`
       (29 suites / 99 tests) all green.
+- [x] (Added after independent evaluator review) mount-time `getRedFlags` fetch is seq-gated too
+      (`seq 0`) — a slow initial fetch can no longer overwrite a fresher edit-triggered result.
+      Third test added: "never lets a slow mount-time red-flags fetch overwrite a fresher
+      edit-triggered one" — passes.
 
 ### Invariants that must still hold (AGENTS.md §2)
 
@@ -119,8 +123,11 @@ which keeps the change small and confined to the one file that owns the race.
 ### Definition of done
 
 - [x] Every _Done condition_ checked with evidence
-- [x] `pnpm verify` green; api e2e green; _Leave clean_ gate to be run before handoff
-- [ ] `evaluator-rubric.md` scored by a separate subagent — PASS or accepted CONDITIONAL, cheap
-      non-blocking items closed same session
-- [ ] `session-handoff.md`'s "Known gaps" entry for this race removed/updated; `progress.md`
+- [x] `pnpm verify` green; api e2e green; _Leave clean_ gate run before handoff
+- [x] `evaluator-rubric.md` scored by a separate subagent — **PASS**, zero required fixes. Three
+      non-blocking findings: (1) mount-time `getRedFlags` not seq-gated — closed same session
+      (see above), (2) multi-tab/multi-device editing still races at the server — structural,
+      out of scope, logged as a known gap, (3) queued PATCH silently dropped on unmount mid-chain
+      — pre-existing behavior, not introduced by this fix, logged as a known gap.
+- [x] `session-handoff.md`'s "Known gaps" entry for this race removed/updated; `progress.md`
       updated with a dated entry

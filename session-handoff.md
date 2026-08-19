@@ -166,37 +166,46 @@ _Overwritten each session. Read this FIRST to resume — see AGENTS.md Session p
   older majority of saved notes can dilute a real, recent preference shift) — a conscious,
   undecided product question flagged by a prior evaluator, not a bug.
 - No rate limiting / no CSRF concern beyond JWT bearer auth (SPA + bearer token, no cookies).
-- **Cross-cycle transcript-autosave race (found by the `red_flags` evaluator, NOT fixed yet)**:
-  in `EncounterWorkspacePage.onTranscriptChange`, under elevated network latency an older
-  `updateInput` PATCH can resolve *after* a newer one, leaving RDS with a stale transcript — which
-  then also stales the red-flags banner and the Subjective section of the next generated note.
-  This is a pre-existing Tier 0/1 bug, not introduced by any pioneer/admin sprint. Needs its own
-  sprint-contract before being touched; likely fix shape is a monotonic request-sequence guard
-  (ignore a PATCH/GET response if a newer request for the same encounter has already started),
-  not a debounce-interval change.
+- **Cross-cycle transcript-autosave race — FIXED this session** (`fix/autosave-race-guard`
+  branch, commit + follow-up on top): `EncounterWorkspacePage.tsx` now serializes every
+  `/input` PATCH (both `onTranscriptChange` and `onTemplateChange`) through one client-side
+  promise chain (`inputPatchChain`/`queueInputUpdate`), so at most one is ever in flight — the
+  server can no longer apply an older edit after a newer one. The `getRedFlags` follow-up
+  (including the mount-time fetch, tagged `seq 0`) is separately seq-gated so a slow, stale
+  response can't overwrite fresher UI state either. New test:
+  `apps/web/src/features/encounter/__tests__/autosave-race.test.tsx` (3 tests). Independently
+  evaluated **PASS**, zero required fixes. Two remaining non-blocking, out-of-scope limitations
+  (not bugs introduced by this fix — logged here per the evaluator):
+  - **Multi-tab/multi-device**: serialization is per mounted-component-instance. Two browser
+    tabs/devices editing the same encounter concurrently can still race at the server exactly as
+    before — this fix only closes the *single-client* race. A true fix would need a server-side
+    version/sequence column, which is out of scope for a frontend-only bug fix.
+  - **Unmount mid-chain**: if the component unmounts (navigate away) while a PATCH is queued but
+    not yet fired, the queued update is silently dropped — no `beforeunload`/flush-on-unmount
+    handling. Pre-existing behavior, not introduced by this fix.
 
 ## Next feature to work
 
 **Nothing is required.** Tier 0 (15/17, 2 blocked on real AWS access), Tier 1 (17/17), and Tier 2
-(4/4) are all complete — every non-blocked item in `feature-list.json` is `passing`.
+(4/4) are all complete — every non-blocked item in `feature-list.json` is `passing`. The tracked
+cross-cycle autosave race is now fixed too (see above) — not a `feature-list.json` item, but the
+one concrete known bug carried from prior sessions.
 
 What's left, in priority order if the user wants to keep going:
-1. **The tracked cross-cycle autosave race** (see "Known gaps" above) — a real, confirmed bug in
-   core Tier 0/1 save-path logic, not new-feature scope. Needs its own `sprint-contract.md`.
-2. **Wiring the `/admin` shell's nav to real pages** (view-all/roster/templates-CRUD) — currently
+1. **Wiring the `/admin` shell's nav to real pages** (view-all/roster/templates-CRUD) — currently
    backend-complete but frontend-inert placeholder links. Not required by any acceptance test, but
    would make the admin surface demoable end-to-end in the walkthrough rather than curl-only.
-3. **`infra.rds_postgres_private` / `infra.ec2_nginx_tls`** — the only remaining `blocked` items.
+2. **`infra.rds_postgres_private` / `infra.ec2_nginx_tls`** — the only remaining `blocked` items.
    Everything code/config-side is ready; only real AWS account provisioning is outstanding, which
    requires the user to provide credentials/access.
-4. Nothing else in `feature-list.json` is `failing` — a fresh session should not invent new scope
+3. Nothing else in `feature-list.json` is `failing` — a fresh session should not invent new scope
    without the user asking for it first.
 
 **Before picking up anything new:** re-run the sanity check from item 4 at the top of this file —
 diff the working-tree `feature-list.json`/`AGENTS.md` against `git show HEAD:<file>` before
-trusting either as-is, since this session found real drift there. **If picking up (1) or anything
-new:** overwrite `sprint-contract.md`'s Active sprint section fresh before writing code. **After
-the code is green:** launch a fresh evaluator subagent (repo path, branch name, an unused scratch
-port, explicit instruction to reproduce claims live rather than trust them, told to actually run
-the app rather than just read tests). **If it flags anything, even non-blocking, close what's
-cheap to close same-session** — this pattern has held across every sprint this project has run.
+trusting either as-is, since this session found real drift there. **Overwrite
+`sprint-contract.md`'s Active sprint section fresh before writing code. After the code is green:**
+launch a fresh evaluator subagent (repo path, branch name, an unused scratch port, explicit
+instruction to reproduce claims live rather than trust them, told to actually run the app rather
+than just read tests). **If it flags anything, even non-blocking, close what's cheap to close
+same-session** — this pattern has held across every sprint this project has run.

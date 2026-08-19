@@ -36,14 +36,17 @@ the fast way to recover context without re-exploring the repo. Newest entry on t
   `passing`. Only `infra.rds_postgres_private`/`infra.ec2_nginx_tls` remain, both `blocked` on a
   human providing real AWS account access (see Blockers below). Nothing left an agent can pick up
   unattended without new direction from the user.
-- **Known gap (tracked, not yet fixed):** a cross-cycle race in
-  `EncounterWorkspacePage`'s transcript-autosave debounce — under elevated network latency, an
-  older `updateInput` PATCH resolving after a newer one can leave the DB with a stale transcript,
-  which then also stales the red-flags banner and the generated note's Subjective section.
-  Discovered by the `pioneer.red_flags` evaluator (confirmed via direct DB query + screenshot).
-  This is a **pre-existing Tier 0/1 mechanism bug**, not introduced by this sprint (this sprint's
-  own intra-cycle fix — awaiting `updateInput` before re-scanning red flags — is itself correct).
-  Needs its own dedicated sprint-contract before being touched, since it's core save-path logic.
+- **Cross-cycle autosave race — fixed (2026-08-18):** `EncounterWorkspacePage`'s
+  `/input` PATCHes (both `onTranscriptChange` and `onTemplateChange`) now serialize through one
+  client-side promise chain, so at most one is ever in flight — the server can no longer apply an
+  older edit after a newer one. `getRedFlags` follow-ups (edit-triggered and mount-time, both) are
+  separately seq-gated so a slow response can't overwrite fresher UI state either. Branch
+  `fix/autosave-race-guard`, new test `apps/web/src/features/encounter/__tests__/
+  autosave-race.test.tsx` (3 tests). Independently evaluated **PASS**, zero required fixes.
+  Remaining known limitations (structural, out of scope for a frontend-only fix, not new bugs):
+  multi-tab/multi-device editing of the same encounter can still race at the server (would need a
+  server-side version column); a queued PATCH is silently dropped if the component unmounts
+  mid-chain (pre-existing, no `beforeunload`/flush-on-unmount handling).
 - **Environment:** local bootstrap via `pnpm setup` (`tools/init.sh` → docker-compose Postgres+pgvector on host port **5433** — 5432 is occupied by an unrelated older project on this machine, `~/workstation/ai-clinical-scribe`, don't touch it). `AI_PROVIDER=mock` by default (deterministic, no network calls) — real Bedrock wiring exists in `libs/ai/src/bedrock-provider.ts` but is untested (no AWS creds in this environment).
 - **Open decisions:** none outstanding — raw `pg` + `node-pg-migrate` (not an ORM), zod validation via a custom `ZodValidationPipe`, plain CSS (no UI framework).
 - **Blockers:** `infra.rds_postgres_private` and `infra.ec2_nginx_tls` require an actual AWS account/credentials to provision EC2 + RDS — cannot be done by an agent unattended (see `infra/DEPLOY.md`). Everything code/config-side for both (migrations, nginx.conf, IAM notes, TLS verify script) is ready; only the real cloud provisioning step is outstanding.
