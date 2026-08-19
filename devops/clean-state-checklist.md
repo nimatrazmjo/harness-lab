@@ -63,6 +63,8 @@ this workstream; run _Leave clean_ before ending or handing off.
       `verify` commands actually succeeded against the real target)
 - [ ] `devops/progress.md` has a new dated entry (what changed, real verify output, what's next)
 - [ ] `devops/session-handoff.md` overwritten with the current snapshot and the single next action
+- [ ] If any feature's `status` or `dependsOn` changed, regenerate `devops/graph.md`:
+      `python3 scripts/generate-feature-graph.py devops/feature-list.json --out devops/graph.md --title "DevOps workstream — feature dependency graph"`
 
 ---
 

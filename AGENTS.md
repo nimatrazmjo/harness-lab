@@ -103,12 +103,14 @@ progress.md        # rolling log: durable, append-only history (append at sessio
 session-handoff.md # warm baton-pass: overwritten each session, read first to resume
 clean-state-checklist.md # start-clean / leave-clean gates run at both ends of a session
 feature-list.json  # the prioritized, tier-ordered source of truth (work top-down)
+graph.md           # feature dependency graph, auto-generated — see scripts/generate-feature-graph.py
 devops/             # SEPARATE, on-demand workstream (containers/Terraform/CI-CD) — its own
                     # AGENTS.md + feature-list.json, invoked via the `/devops` skill so it never
                     # loads into a normal product-coding session. See §5.
 BUILD-CHECKLIST.md # phased day-by-day build sequence — the concrete order to work the tiers in
 sprint-contract.md # per-feature "done" agreed BEFORE coding (prevents scope drift)
 evaluator-rubric.md # adversarial scorecard applied AFTER coding (separate eval pass)
+scripts/            # generate-feature-graph.py (shared graph renderer) + secret/TLS check scripts
 ```
 
 **Context files (read at session start, keep current):** `session-handoff.md` (where we STOPPED —
