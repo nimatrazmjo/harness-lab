@@ -1,5 +1,42 @@
 # Sprint Contract — DevOps / CI-CD workstream
 
+## Re-verification pass — devops.terraform_networking_rds (2026-08-19, second pass, same day) — STILL BLOCKED
+
+**Not a new sprint.** Dispatched as a continuation of PR #21 (`feat/devops-terraform-networking-rds`)
+after a report that a human account owner applied the Gap C IAM fix documented below
+(`ssm:SendCommand` on the AWS-owned `AWS-RunShellScript` document) via a newly-set-up scoped
+grantor role. Goal: prove or disprove this for real, not trust the report. **Discovered mid-work
+that PR #21 had already been merged to `main` before this pass began** — not something this
+session caused; the merge predates this session's first AWS action by ~3 hours.
+
+**What was done:** `terraform plan` (`AWS_PROFILE=devops-agent`) confirmed zero drift before
+touching anything. Criteria 1-2 re-confirmed for all 3 envs (fast checks). Criterion 3 not
+re-run (already solidly proven, slow to repeat). Criterion 4: built a fresh throwaway SSM-only
+EC2 probe (Amazon Linux 2023, no SSH/key pair, IAM role `scribe-pgvector-probe` scoped to only
+`AmazonSSMManagedInstanceCore`, attached to all 3 envs' compute SGs) — identical design to the
+original attempt, created and torn down entirely via raw `aws` CLI, kept OUT of Terraform state.
+
+**Result: `ssm:SendCommand` on `arn:aws:ssm:us-east-1::document/AWS-RunShellScript` is STILL
+denied** — the exact same `AccessDeniedException`, word-for-word, as the original attempt. The
+Gap C fix has not actually landed (or landed on the wrong policy/resource). Also newly found:
+`ssm:DescribeInstanceInformation` is separately denied even against a `deploy=true`-tagged
+instance (related, non-blocking gap).
+
+**Cleanup confirmed complete:** probe instance terminated, its IAM role and instance profile
+deleted, both confirmed gone via `get-role`/`get-instance-profile` returning `NoSuchEntity`.
+
+**Per the task's explicit instruction: did not force a pass, did not invent a workaround.**
+`devops/feature-list.json` status remains `blocked`; rubric updated with this re-attempt's
+evidence. Full detail: `devops/manual.md` Step 10's "RE-ATTEMPTED 2026-08-19" subsection,
+`devops/progress.md`'s second 2026-08-19 entry. Since PR #21 was already merged, opened a NEW
+docs-only PR (#22, `docs/devops-terraform-networking-rds-gap-c-reattempt`, off post-merge `main`)
+for this pass's changes (`devops/manual.md`, `devops/progress.md`, `devops/session-handoff.md`,
+`devops/feature-list.json`, this file — no Terraform/code change), matching this workstream's
+established post-merge confirmation-PR pattern. PR #22 **not merged** (never-merge-own-PR
+convention held).
+
+---
+
 ## Sprint outcome — devops.terraform_networking_rds (2026-08-19) — BLOCKED (3/4 criteria proven)
 
 Real AWS applied: one shared VPC (`10.30.0.0/16`) + per-env public/private subnet pairs (2 AZs) +

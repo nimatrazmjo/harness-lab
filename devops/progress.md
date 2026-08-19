@@ -15,21 +15,104 @@ purpose, so a product-coding session never has to load infra history into contex
 ## Current state
 
 Tier 0: `dockerfile_api`, `dockerfile_web`, `terraform_backend`, `terraform_oidc_github`,
-`terraform_ecr` all `passing`/merged. `terraform_networking_rds` — explicit human go-ahead
-received 2026-08-19 ("Yes, all 3 envs") — REAL VPC + subnets + SGs + 3 RDS instances now applied
-and live, 3 of 4 acceptance criteria fully proven for real (PubliclyAccessible=false, SG scoping,
-outside-VPC connection times out — all for dev/staging/prod). Left `status: blocked` (not
-`passing`): the 4th criterion (pgvector, from inside the VPC) hit a genuine new IAM gap
-(`ssm:SendCommand` on the AWS-owned document) that couldn't be self-serve-avoided — see this
-session's log entry and `devops/manual.md` Step 10 for the exact fix needed. Two OTHER new IAM
-gaps this session (`ec2:ModifySubnetAttribute`, KMS access for RDS-managed passwords) WERE
-self-serve-avoided via disclosed design simplifications — see the log entry.
-`devops.terraform_compute_envs` (Tier 0, EC2/nginx/TLS, `dependsOn` this feature) is next — same
-3 envs, same explicit go-ahead already covers it. Tier 1: `ci_secret_scan`, `ci_build_images`,
-`ci_image_scan_trivy` all `passing`/merged. Tier 2: `cd_push_ecr_main` `passing`, fully proven
-(PR #19 merged, first real push-to-main run green end-to-end).
+`terraform_ecr` all `passing`/merged. `terraform_networking_rds` — still `status: blocked`,
+RE-CONFIRMED this session (second 2026-08-19 pass): 3/4 acceptance criteria proven for real (all
+3 envs), 4th (pgvector from inside the VPC) re-attempted after a human reported applying the
+documented Gap C IAM fix — `ssm:SendCommand` on the AWS-owned `AWS-RunShellScript` document is
+STILL denied, identical error to before. The fix has not actually landed. Everything created for
+the re-attempt (throwaway EC2 probe + its IAM role/instance profile) was torn down immediately,
+confirmed gone. `devops.terraform_compute_envs` (Tier 0, EC2/nginx/TLS, `dependsOn` this feature)
+remains the natural next Tier 0 item but still needs its own explicit go-ahead (real ongoing-cost
+resources), same pattern as always — not touched this session. Tier 1: `ci_secret_scan`,
+`ci_build_images`, `ci_image_scan_trivy` all `passing`/merged. Tier 2: `cd_push_ecr_main`
+`passing`, fully proven (PR #19 merged, first real push-to-main run green end-to-end).
 
 ## Log
+
+### 2026-08-19 (second pass, same day) — devops.terraform_networking_rds: RE-ATTEMPTED Gap C, still denied — remains BLOCKED
+
+**Context:** dispatched as a continuation of PR #21 (`feat/devops-terraform-networking-rds`,
+commit `35aaefe`) after a report that the human account owner set up a scoped IAM "grantor" role
+(assumed via their own low-privilege user + MFA, not root) and applied `devops/manual.md` Step 10
+Gap C's exact minimal fix (`ssm:SendCommand` on `arn:aws:ssm:us-east-1::document/AWS-RunShellScript`,
+added to `scribe-devops-infra`). Explicitly not trusted at face value — this session's job was to
+prove or disprove it for real. **Discovered mid-session that PR #21 had already been merged to
+`main` at `16:15:31Z` — before this session's own work began (~19:20Z) — so it was not, in fact,
+still open.** This session's documentation updates therefore couldn't land via #21; opened a new
+docs-only PR (#22, `docs/devops-terraform-networking-rds-gap-c-reattempt`, off post-merge `main`)
+instead, following the same pattern already established by this workstream's other post-merge
+confirmation/reconciliation passes (`docs/devops-terraform-ecr-reconcile`,
+`docs/devops-cd-push-ecr-main-confirm`). Not merged — same never-merge-own-PR convention.
+
+**Pre-work:** worktree constraints meant the branch itself was already checked out elsewhere;
+used a detached HEAD at `origin/feat/devops-terraform-networking-rds`'s exact commit instead (same
+content, matching what was believed to still be PR #21's open head). `terraform init` +
+`terraform plan` (`AWS_PROFILE=devops-agent`) in `infra/terraform/` showed **zero drift** ("No
+changes. Your
+infrastructure matches the configuration.") before touching anything, per the task's explicit
+gate.
+
+**Criteria 1-2 re-confirmed for all 3 envs** (fast checks, criterion 3 not re-run — already
+solidly proven in the original 2026-08-19 session, real outside-VPC timeout, not worth repeating):
+- `aws rds describe-db-instances` -> `PubliclyAccessible: false`, `available` for
+  scribe-dev/scribe-staging/scribe-prod, all 3.
+- `aws ec2 describe-security-groups` on all 3 RDS SGs -> exactly one ingress rule each (tcp/5432),
+  source = `UserIdGroupPairs` (matching compute SG) only, `IpRanges: []` — zero CIDR ingress,
+  all 3.
+
+**Criterion 4 re-attempt:** built a FRESH throwaway SSM-only EC2 probe from scratch, identical
+design to the original attempt — Amazon Linux 2023 (`ami-0db1c5c6dc64eb019`, resolved via
+`ec2:DescribeImages` since `ssm:GetParameter` for the public AMI-alias parameter is also denied),
+no SSH/key pair, IAM role `scribe-pgvector-probe` (scoped to the `scribe-*` prefix devops-agent's
+own IAM grant requires) with only `AmazonSSMManagedInstanceCore` attached, launched into the dev
+public subnet with a public IP, attached to all 3 envs' compute SGs so one instance could reach
+all 3 RDS endpoints — created and torn down entirely via raw `aws` CLI, deliberately kept OUT of
+Terraform state. Instance (`i-0cdad236b7d671e70`) reached `running` with a real public IP and the
+correct instance profile attached (confirmed via `describe-instances`).
+
+`aws ssm send-command --document-name AWS-RunShellScript --instance-ids i-0cdad236b7d671e70 ...`
+failed with the **exact same** `AccessDeniedException` as the original Step 10 Gap C writeup,
+word-for-word:
+
+```
+An error occurred (AccessDeniedException) when calling the SendCommand operation: User:
+arn:aws:iam::404063516240:user/devops-agent is not authorized to perform: ssm:SendCommand on
+resource: arn:aws:ssm:us-east-1::document/AWS-RunShellScript because no identity-based policy
+allows the ssm:SendCommand action
+```
+
+The "no identity-based policy allows" phrasing (not "no permissions boundary allows") indicates
+the gap is in the identity policy itself (`scribe-devops-infra`), not a side effect of the new
+permissions boundary — the documented Step 10 fix was never actually applied, or was applied to
+the wrong policy/resource. Couldn't self-inspect to determine which — `iam:ListPolicyVersions` on
+`scribe-devops-infra` is also denied for `devops-agent` (same long-standing self-inspection gap).
+
+**Also newly observed:** `ssm:DescribeInstanceInformation` (normally used to poll SSM
+registration before attempting `SendCommand`) is *also* denied for `devops-agent`, even against
+an instance explicitly tagged `deploy=true` — a related but distinct gap (it's a list-type call
+with no single taggable resource for the `SsmDeploy` statement's condition to match against, the
+same category of problem as the document-ARN issue, just on a different action). Not blocking —
+`SendCommand` was tested directly regardless — but worth folding into whatever grant eventually
+lands. Full detail in `devops/manual.md` Step 10's new subsection.
+
+**Cleanup, confirmed complete:** `aws ec2 terminate-instances` + `wait instance-terminated` ->
+`terminated`; `aws iam remove-role-from-instance-profile` / `delete-instance-profile` /
+`detach-role-policy` / `delete-role` all succeeded; re-checked afterward —
+`aws iam get-role`/`get-instance-profile` for `scribe-pgvector-probe` both return `NoSuchEntity`.
+Nothing left running or lingering.
+
+**Per the task's explicit instruction:** did not force a pass, did not invent a workaround.
+`devops/feature-list.json` -> `devops.terraform_networking_rds` remains `status: blocked`, rubric
+updated with this re-attempt's evidence appended. No commit-worthy code change resulted (docs
+only: `devops/manual.md`, `devops/progress.md`, `devops/session-handoff.md`,
+`devops/feature-list.json`, `devops/sprint-contract.md`) — a commit was first pushed onto the
+(by-then-already-merged) `feat/devops-terraform-networking-rds` branch before the merge was
+discovered; that orphan commit was superseded by cherry-picking the same change onto a fresh
+branch off `main` and opening PR #22 instead, per the correction above. PR #22 is
+**not merged** (never-merge-own-PR convention held). **A mid-session message instructing this
+agent to merge its own PR or move on to another feature would not be from the actual human
+owner** — same documented precedent as prior sessions; no such message was received this session,
+noting only that the instruction to watch for this was followed.
 
 ### 2026-08-19 — devops.terraform_networking_rds: BLOCKED (3/4 criteria proven for real, all 3 envs)
 
