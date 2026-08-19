@@ -65,6 +65,13 @@ check_not_root() {
       echo "  [STOP] profile '$profile' is the account ROOT user."
       root_creds=1
     fi
+  else
+    # Doesn't resolve (no local credentials, expired session, bad config, etc.) -- report it
+    # explicitly rather than silently passing. This means the root check for THIS profile
+    # literally didn't run, not that it passed -- don't let a bare "Toolchain ready" imply
+    # otherwise.
+    echo "  [info] profile '$profile' does not resolve locally (no credentials / expired /"
+    echo "         misconfigured) -- the root check for this profile did not run"
   fi
 }
 if command -v aws >/dev/null 2>&1; then

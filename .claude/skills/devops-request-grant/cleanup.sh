@@ -20,12 +20,19 @@ for f in ./statement.json /tmp/statement.json; do
     found=1
     echo "  [found] $f"
     echo "    $(head -c 200 "$f")..."
-    read -r -p "    Delete this file? [y/N] " ans
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-      rm -f "$f"
-      echo "    [removed] $f"
+    if [ -t 0 ]; then
+      read -r -p "    Delete this file? [y/N] " ans
+      if [[ "$ans" =~ ^[Yy]$ ]]; then
+        rm -f "$f"
+        echo "    [removed] $f"
+      else
+        echo "    [kept] $f -- remove manually once you've confirmed it's no longer needed"
+      fi
     else
-      echo "    [kept] $f -- remove manually once you've confirmed it's no longer needed"
+      # No interactive terminal (e.g. an unattended subagent) -- never guess on a delete,
+      # just flag it for the human, same as the other checks below.
+      echo "    [warn] non-interactive session -- not deleting automatically; remove by hand"
+      echo "           once confirmed it's no longer needed: rm -f '$f'"
     fi
   fi
 done

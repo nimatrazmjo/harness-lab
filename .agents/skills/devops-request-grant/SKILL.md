@@ -11,6 +11,14 @@ this is new. This skill runs as its own small, self-contained harness (own `init
 human-runs-the-CLI-themselves fallback: a dedicated subagent does the AWS work end to end, the
 human's only involvement is supplying a live MFA code when the subagent asks for one.
 
+**Scope note:** unlike `devops/`'s files (agent-agnostic — any tool reads `devops/AGENTS.md`
+directly), this skill's own harness under `.claude/skills/devops-request-grant/` is Claude Code
+specific, on purpose — its mechanics (the `Agent` tool's `isolation: "worktree"` subagent
+dispatch, `AskUserQuestion` for the live MFA prompt) don't have a direct equivalent in every
+agent tool. The `devops/AGENTS.md` procedure is the agent-agnostic source of truth every tool can
+follow; this skill is Claude Code's specific implementation of it. A different agent tool
+following the same procedure would need its own dispatch mechanism, not just a path rewrite.
+
 ## What to do
 
 0. **Gate + orient, every invocation, including scheduled/looped ones:**

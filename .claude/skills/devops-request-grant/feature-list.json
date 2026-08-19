@@ -30,7 +30,7 @@
                 "devops-agent can then successfully call ssm:SendCommand against that document for a deploy-tagged target instance."
             ],
             "verify": [
-                "aws iam get-policy-version --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-infra --version-id <new-version> --profile nimat-admin | grep SsmSendCommandDocument",
+                "aws iam get-policy-version --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-infra --version-id <new-version> | grep SsmSendCommandDocument -- run with the iam-grantor-devops-agent ASSUMED-ROLE credentials still active from the apply step, in the same subagent session; neither nimat-admin (only sts:AssumeRole) nor devops-agent (structurally can't read its own policies) can call iam:GetPolicyVersion on their own",
                 "Re-run the throwaway SSM-probe mechanism (devops/progress.md's 2026-08-19 entries) with AWS_PROFILE=devops-agent and confirm ssm:SendCommand no longer returns AccessDeniedException"
             ],
             "dependsOn": [],
