@@ -1,0 +1,61 @@
+name: Build Images
+
+# devops.ci_build_images: validates that both production Dockerfiles (apps/api/Dockerfile,
+# apps/web/Dockerfile — already `passing`, not modified here) actually compile, on every PR.
+# Pure build validation, nothing is pushed to a registry from a PR build — push-on-main is a
+# separate, later feature (devops.cd_push_ecr_main). Uses Buildx with the GitHub Actions cache
+# backend (cache-from/cache-to: type=gha) so PR builds reuse layers instead of building cold
+# every time.
+#
+# Both Dockerfiles build from the REPO ROOT (per their own header comments — they reach into
+# libs/shared-types and libs/ai via the pnpm workspace), so `context: .` here, not the app
+# subdirectory.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-api:
+    name: build-api
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build scribe-api image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          load: false
+          tags: scribe-api:ci
+          cache-from: type=gha,scope=scribe-api
+          cache-to: type=gha,mode=max,scope=scribe-api
+
+  build-web:
+    name: build-web
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build scribe-web image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: false
+          load: false
+          tags: scribe-web:ci
+          cache-from: type=gha,scope=scribe-web
+          cache-to: type=gha,mode=max,scope=scribe-web
