@@ -37,6 +37,24 @@
             "dependsOn": [],
             "reviewedTarget": "https://github.com/nimatrazmjo/harness-lab/pull/23",
             "rubric": "PASS overall. Dimension 2 (real re-verification) is the standout lesson: the second review pass's false re-flags were only caught because fixes were independently re-checked against the real GitHub content rather than trusted at face value — exactly the discipline review-shared/evaluator-rubric.md's dimension 2 now codifies."
+        },
+        {
+            "id": "review-harness-2026-08-19-02-review-skills-pr24",
+            "status": "awaiting_merge_approval",
+            "title": "PR #24 — the four review skills' own introduction (dogfooded on itself)",
+            "description": "review-harness's scope explicitly covers .claude/skills/** — PR #24 is exactly that, so this is the skill reviewing the PR that created it. First review attempt accidentally targeted the wrong local branch (same class of mistake as PR #23's second pass, now doubly-confirmed as a real recurring risk, not a one-off); corrected by fetching the PR's actual diff directly via `gh pr diff 24` before dispatching a review against that file. Found 3 real issues: the seeded review-web entry's 'requested' status wasn't in the documented enum, clean-state-checklist.md's merge gate contradicted PROCEDURE.md's own documented merged-confirmation flow, and the loop no-op guard omitted awaiting_merge_approval as a terminal state.",
+            "acceptance": [
+                "/code-review-equivalent pass ran against the PR's actual fetched diff, not an ambiguous local checkout.",
+                "All 3 findings fixed and verified against the real remote branch via GitHub API before being reported as resolved.",
+                "PR not merged by this skill — stopped at awaiting_merge_approval per explicit human decision."
+            ],
+            "verify": [
+                "gh api repos/.../contents/.claude/skills/review-shared/PROCEDURE.md?ref=feat/domain-review-skills -- confirmed 'requested' and awaiting_merge_approval fixes genuinely live",
+                "gh pr view 24 --json state -> OPEN (not merged by this cycle)"
+            ],
+            "dependsOn": [],
+            "reviewedTarget": "https://github.com/nimatrazmjo/harness-lab/pull/24",
+            "rubric": "PASS. Dimension 2 (real re-verification against the actual target, not local state) was directly load-bearing here too: the first review attempt's misdirected result was only caught by checking git diff --stat main...HEAD against the diff's own stated content and noticing the mismatch, not by trusting the returned findings at face value."
         }
     ]
 }
