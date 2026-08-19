@@ -14,15 +14,37 @@ purpose, so a product-coding session never has to load infra history into contex
 
 ## Current state
 
-`devops.dockerfile_api`, `devops.dockerfile_web`, `devops.terraform_backend`,
-`devops.terraform_oidc_github`, and now `devops.ci_secret_scan` are `passing`. The first three
-are merged to `main`; `terraform_oidc_github`'s three real bug fixes are on PR #10, pending
-merge; `ci_secret_scan` is on PR #12, pending merge. `devops.terraform_ecr` is `blocked` on one
-more IAM grant (`ecr:TagResource` — see `devops/manual.md` Step 9); Terraform is fully written
-and ready to re-apply once granted. The two AWS-account-blocked items
-(`terraform_networking_rds`, `terraform_compute_envs`) are unaffected/unchanged.
+Tier 0 is done except the two real-AWS items genuinely blocked on a pending scope decision
+(`terraform_networking_rds`, `terraform_compute_envs` — domain `test.nimat.dev` now decided,
+full 3-env (dev/staging/prod) rollout confirmed, but not yet dispatched — real ongoing-cost
+resources, needs explicit go-ahead each time per this workstream's pattern). All of Tier 0's
+other items (`dockerfile_api`, `dockerfile_web`, `terraform_backend`, `terraform_oidc_github`,
+`terraform_ecr`) are `passing` and merged. Tier 1 is underway: `ci_secret_scan` and
+`ci_build_images` are `passing` and merged; `ci_image_scan_trivy` is next.
 
 ## Log
+
+### 2026-08-18 — devops.ci_build_images: passing (verified after an early merge)
+
+`.github/workflows/build-images.yml` — two `pull_request`-triggered jobs (`build-api`,
+`build-web`) via `docker/build-push-action@v6` against the existing, unmodified Dockerfiles.
+`push: false`/`load: false` (pure build validation, no registry interaction), GHA cache backend
+(`cache-from`/`cache-to: type=gha`, scoped per image). No `latest` tag anywhere (local CI tags
+are `scribe-api:ci`/`scribe-web:ci`).
+
+The implementing agent was still waiting on its own PR's CI run to report back (a real
+background-job wait, not idle) when the PR got merged — the merge itself was fine and the
+workflow genuinely works, but `feature-list.json`'s status and this log never got updated
+before that happened. Re-verified directly against the real merged run rather than trusting
+the incomplete bookkeeping:
+- `gh pr checks 14` → `build-api` pass (1m43s), `build-web` pass (1m30s).
+- `gh run view 32204404442 --log | grep -c "Run docker push"` → `0` — confirmed no push
+  command executed anywhere in the run, not just eyeballed from the workflow file.
+- Workflow file inspected directly: `push: false`, `load: false`, `cache-from`/`cache-to:
+  type=gha` present on both jobs.
+
+`devops/feature-list.json` → `devops.ci_build_images` `passing`. Next: `devops.ci_image_scan_trivy`
+(Tier 1, `dependsOn: ["devops.ci_build_images"]`, now unblocked).
 
 ### 2026-08-18 — devops.ci_secret_scan: passing (Tier 1, no AWS involved)
 
