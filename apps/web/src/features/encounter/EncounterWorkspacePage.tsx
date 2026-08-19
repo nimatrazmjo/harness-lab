@@ -31,6 +31,12 @@ export function EncounterWorkspacePage() {
   const [redFlags, setRedFlags] = useState<RedFlag[]>([]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Serializes every /input PATCH (from both onTranscriptChange and onTemplateChange) so at
+  // most one is ever in flight — otherwise an older request can resolve at the server after a
+  // newer one and leave RDS holding a stale transcript (session-handoff.md "cross-cycle
+  // transcript-autosave race").
+  const inputPatchChain = useRef<Promise<unknown>>(Promise.resolve());
+  const inputPatchSeq = useRef(0);
 
   useEffect(() => {
     if (!encounterId) return;
@@ -64,23 +70,46 @@ export function EncounterWorkspacePage() {
     };
   }, [note, generating, encounterId]);
 
+  // Queues one /input PATCH after another, never concurrently — guarantees the server applies
+  // them in the order the client issued them, so an older edit can never overwrite a newer one.
+  // `seq` lets a caller detect if a fresher update has been queued since, so it can skip a
+  // now-stale follow-up (e.g. the red-flags refetch) instead of clobbering newer UI state.
+  function queueInputUpdate(id: string, value: string, tmplId: string | undefined) {
+    const seq = ++inputPatchSeq.current;
+    const result = inputPatchChain.current.then(
+      () => encountersApi.updateInput(id, value, tmplId),
+      () => encountersApi.updateInput(id, value, tmplId),
+    );
+    inputPatchChain.current = result.catch(() => undefined);
+    return { seq, result };
+  }
+
   function onTranscriptChange(value: string) {
     setTranscript(value);
     if (!encounterId) return;
     // Debounced autosave of the raw input — persisted server-side as the provider types.
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(async () => {
-      await encountersApi.updateInput(encounterId, value, templateId);
-      // Re-scan for red flags only after the new transcript is actually persisted — otherwise
-      // this could race the PATCH above and read the still-stale transcript.
-      encountersApi.getRedFlags(encounterId).then(setRedFlags);
+    saveTimer.current = setTimeout(() => {
+      const { seq, result } = queueInputUpdate(encounterId, value, templateId);
+      result
+        // Re-scan for red flags only after the new transcript is actually persisted.
+        .then(() => encountersApi.getRedFlags(encounterId))
+        .then((flags) => {
+          // Apply the result only if no newer input update has been queued since this one was
+          // dispatched — otherwise a slow response here could overwrite the banner with stale
+          // results even though the underlying PATCH itself is safely serialized.
+          if (seq === inputPatchSeq.current) {
+            setRedFlags(flags);
+          }
+        })
+        .catch(() => {});
     }, 600);
   }
 
   function onTemplateChange(id: string) {
     setTemplateId(id || undefined);
     if (!encounterId) return;
-    encountersApi.updateInput(encounterId, transcript, id || undefined);
+    queueInputUpdate(encounterId, transcript, id || undefined).result.catch(() => {});
   }
 
   async function onGenerate() {
