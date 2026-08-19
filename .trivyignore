@@ -1,0 +1,74 @@
+# devops.ci_image_scan_trivy — allowlist for genuinely-unfixable / inapplicable findings only.
+#
+# Every entry below was reached AFTER real remediation, not instead of it:
+#   - apps/api/Dockerfile: fixed a real bug where `pnpm install --frozen-lockfile --prod` did
+#     not actually prune devDependencies already on disk (vite/vitest/esbuild + their CVEs were
+#     shipping in the runtime image); now followed by `pnpm prune --prod`, which does.
+#   - apps/api/Dockerfile: removed the bundled `npm` CLI from the runtime stage (this image only
+#     ever runs `node apps/api/dist/main.js`, never npm/npx) — eliminated real CRITICAL/HIGH CVEs
+#     in npm's own vendored tar/sigstore/ip-address/brace-expansion/picomatch by not shipping
+#     that unused ~18MB of tooling at all.
+#   - pnpm-workspace.yaml: added `overrides` forcing multer >=2.2.0 and lodash >=4.18.0 (both
+#     real, exploitable-in-principle transitive prod deps — multer via
+#     @nestjs/platform-express, lodash via @nestjs/config) up to their patched versions.
+#
+# What's left below is 13 CVE IDs (22 findings) entirely in Debian OS packages inherited from
+# the `node:22-slim` base image (confirmed already pinned to the newest available digest as of
+# 2026-08-18 — `docker pull node:22-slim` resolves to the exact same digest already in
+# apps/api/Dockerfile's ARG NODE_IMAGE, so there is no newer patched digest to bump to). None of
+# these packages (mount/util-linux family, gzip, perl-base, ncurses, libacl1, zlib1g) are ever
+# invoked by this image's runtime process — the container's only CMD is
+# `node apps/api/dist/main.js`; perl/mount/gzip/ncurses are incidental Debian-base packages, not
+# part of this application's own attack surface — genuinely inapplicable to how this image is
+# actually used, not a "we didn't get around to it" suppression.
+
+# CVE-2026-53615 — util-linux/libblkid/libmount/libsmartcols/libuuid/bsdutils family. Debian
+# status: "affected", no patched package version yet. This image never mounts filesystems or
+# calls `mount`/`blkid`/etc — inherited OS tooling, unused at runtime.
+# https://avd.aquasec.com/nvd/cve-2026-53615
+CVE-2026-53615
+
+# CVE-2026-41992 — gzip. Debian status: "fix_deferred" (Debian security team has deliberately
+# deferred, not yet shipped). `gzip` binary is never invoked by this image's Node.js process.
+# https://avd.aquasec.com/nvd/cve-2026-41992
+CVE-2026-41992
+
+# CVE-2026-54369 — libacl1. Debian status: "fix_deferred". Pulled in transitively by
+# util-linux/coreutils tooling this image never executes.
+# https://avd.aquasec.com/nvd/cve-2026-54369
+CVE-2026-54369
+
+# CVE-2025-69720 — libtinfo6/ncurses-base/ncurses-bin (terminal-handling libs). Debian status:
+# "affected", no fix yet. This image runs a single non-interactive Node process with no TTY/
+# terminal UI — ncurses is dead weight from the base image, not exercised code.
+# https://avd.aquasec.com/nvd/cve-2025-69720
+CVE-2025-69720
+
+# CVE-2026-13221, CVE-2026-42496, CVE-2026-57433, CVE-2026-8376 (CRITICAL) and CVE-2026-42497,
+# CVE-2026-48962, CVE-2026-57432, CVE-2026-9538 (HIGH) — perl-base. Debian status: mix of
+# "affected"/"fix_deferred", no patched package available. `perl` is never invoked anywhere in
+# this image or apps/api's own code (Node/TypeScript only) — it ships only because it's part of
+# Debian's base package set pulled in transitively by other base packages.
+# https://avd.aquasec.com/nvd/cve-2026-13221
+CVE-2026-13221
+# https://avd.aquasec.com/nvd/cve-2026-42496
+CVE-2026-42496
+# https://avd.aquasec.com/nvd/cve-2026-57433
+CVE-2026-57433
+# https://avd.aquasec.com/nvd/cve-2026-8376
+CVE-2026-8376
+# https://avd.aquasec.com/nvd/cve-2026-42497
+CVE-2026-42497
+# https://avd.aquasec.com/nvd/cve-2026-48962
+CVE-2026-48962
+# https://avd.aquasec.com/nvd/cve-2026-57432
+CVE-2026-57432
+# https://avd.aquasec.com/nvd/cve-2026-9538
+CVE-2026-9538
+
+# CVE-2023-45853 (CRITICAL) — zlib1g. Debian status: "will_not_fix" — this is the well-known
+# MiniZip (contrib/minizip) CVE; Debian's zlib1g package does not build/ship the MiniZip
+# component at all, so the vulnerable code path does not exist in the shared library actually
+# installed in this image. Debian's own tracker confirms won't-fix for this reason, not neglect.
+# https://avd.aquasec.com/nvd/cve-2023-45853
+CVE-2023-45853

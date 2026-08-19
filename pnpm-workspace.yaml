@@ -5,3 +5,10 @@ allowBuilds:
   '@nestjs/core': true
   argon2: true
   esbuild: true
+# Transitive-dependency version overrides — forces patched versions of real CRITICAL/HIGH CVEs
+# Trivy found in the built API image (devops.ci_image_scan_trivy), without touching apps/api/src
+# or any application logic. Both are within-major-version patch/minor bumps of a pinned
+# transitive dep (multer via @nestjs/platform-express@10.4.22, lodash via @nestjs/config@3.3.0).
+overrides:
+  multer: ">=2.2.0" # CVE-2026-2359/3304/3520/5079 (multiple multer DoS advisories), fixed >=2.2.0
+  lodash: ">=4.18.0" # CVE-2026-4800 (lodash template injection RCE), fixed 4.18.0
