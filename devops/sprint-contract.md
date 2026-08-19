@@ -98,17 +98,144 @@ locally+remotely. `devops/feature-list.json` → `passing`. Branch
 `feat/devops-ci-secret-scan`, PR #12 open, **not merged** (per this workstream's "never merge
 own PR" rule). Full detail: `devops/progress.md` 2026-08-18 entry.
 
-## Active sprint
+## Sprint outcome — devops.ci_build_images (2026-08-18) — PASSING
 
-**Feature(s):** `devops.ci_build_images` — explicitly dispatched this session (human go-ahead
-given directly for this specific feature, overriding the prior session's "don't start
-`ci_build_images` without explicit go-ahead" note). GitHub-side only, no AWS resources touched.
+Merged (PR #14). See rubric note in `devops/feature-list.json` for evidence. `build-images.yml`
+is the workflow this sprint extends.
 
-**Goal (one sentence):** Add a GitHub Actions workflow that builds `scribe-api` and
-`scribe-web` via Docker Buildx (with GHA layer caching) on every PR, to validate the Dockerfiles
-compile, with no push step anywhere in the workflow.
+## Sprint outcome — devops.ci_image_scan_trivy (2026-08-18) — PASSING
 
-**Tier:** 1 · **Branch:** `feat/devops-ci-build-images`
+**Deviation from this contract's own "explicitly OUT of scope" line, disclosed up front:** the
+contract below pre-committed to "only the ARG digest line, nothing structural" for Dockerfile
+edits. The real local scan (see progress.md's full 2026-08-18 entry) surfaced a genuine
+non-base-image bug — `pnpm install --prod` wasn't pruning already-installed devDependencies —
+plus an unused bundled `npm` CLI shipping real CVEs. Neither is fixable by a digest bump. Given
+the task's overriding instruction to not force a pass and to prefer real remediation over
+`.trivyignore` for genuinely fixable findings, I fixed both (a `pnpm prune --prod` addition and
+an `rm -rf` of the unused npm CLI in the runtime stage) rather than leaving them or blanket-
+ignoring them. Also bumped two real transitive prod-dependency versions (`multer`, `lodash`) via
+`pnpm-workspace.yaml overrides` — a lockfile/workspace-config change, not application source.
+Every change was re-verified against `devops.dockerfile_api`/`devops.dockerfile_web`'s own
+acceptance criteria (fresh `--no-cache` build, `/health` OK, non-root) before proceeding, per
+this task's explicit instruction for base-image-adjacent Dockerfile changes.
+
+All Done conditions met with real evidence:
+- [x] Trivy runs against both images on every PR, after devops.ci_build_images — same job,
+      `load: true` + Trivy install + scan step appended to both `build-api`/`build-web` jobs in
+      `build-images.yml`.
+- [x] Job fails on any CRITICAL/HIGH finding not allowlisted — `--exit-code 1` on the real
+      `trivy image` invocation; proven both ways (ignorefile passes real images, no-ignorefile
+      fails the ancient-base proof).
+- [x] Ancient-base-image PR fails, real Dockerfiles pass — see verification plan below, all
+      commands run for real.
+
+### Verification plan — all run for real, final results
+
+- [x] `trivy image --severity CRITICAL,HIGH scribe-api:local` (no exit-code) BEFORE any code —
+      66 real findings across 3 categories (22 unfixable Debian OS pkgs, 19 leaked
+      devDependencies, 25 in bundled npm's own deps). `scribe-web:local` — 0 findings, clean.
+- [x] After fixes: `trivy image --exit-code 1 --severity CRITICAL,HIGH --ignorefile .trivyignore
+      scribe-api:local` → **exit 0**. Same for `scribe-web:local` → **exit 0**.
+- [x] `docker build -t scribe-api:vuln-test -f - . <<< 'FROM node:18.0.0'` → builds. `trivy image
+      --exit-code 1 --severity CRITICAL,HIGH scribe-api:vuln-test` (no ignorefile) → **exit 1**,
+      62 CRITICAL + 63 HIGH real findings.
+- [x] `actionlint .github/workflows/build-images.yml` (and full-repo `actionlint`) → clean, exit
+      0.
+- [ ] Open the real feature PR / `gh pr checks` — **not yet done as of this commit**; happens
+      immediately after this commit, before reporting done. If the real PR run doesn't match
+      local results, this section will be corrected before declaring `passing`.
+
+### Invariants — confirmed
+
+- [x] No static AWS credentials anywhere (n/a, no AWS calls).
+- [x] No `latest` tag anywhere — Trivy CLI pinned `v0.74.0`, no image tag changes.
+- [x] No-touch zone respected — `git diff` confirms nothing under `apps/*/src` or `libs/**`;
+      touched files are `apps/api/Dockerfile`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`,
+      `.trivyignore` (new), `.github/workflows/build-images.yml`, plus devops bookkeeping.
+- [x] Every `.trivyignore` entry has an individual comment (CVE, Debian status, why
+      inapplicable) — 13 entries, no blanket suppression; verified the file passes real trivy
+      exit-0 runs, not just "looks reasonable."
+- [x] No permanent "build vulnerable image" step in the real workflow — the `node:18.0.0` proof
+      was local-only, image removed afterward (`docker rmi scribe-api:vuln-test`).
+
+## Superseded — original Active-sprint draft, filled in before coding (kept for the concrete
+approach; see "Sprint outcome" above for what actually happened, including the one disclosed
+deviation)
+
+**Feature(s):** `devops.ci_image_scan_trivy` — next Tier 1 item, `dependsOn:
+["devops.ci_build_images"]` (passing, merged). GitHub-side only + local Docker/Trivy, no AWS
+resources touched.
+
+**Goal (one sentence):** Extend `build-images.yml` so both images are also scanned by Trivy for
+CRITICAL/HIGH CVEs on every PR (loading the built image via `load: true` in the same job so
+Trivy has the real artifact), failing the job on any unallowlisted finding, with a `.trivyignore`
+mechanism requiring a justifying comment on every entry (none expected unless a real, unfixable
+base-image CVE turns up).
+
+**Tier:** 1 · **Branch:** `feat/devops-ci-image-scan-trivy`
+
+### Context
+
+`apps/api/Dockerfile` / `apps/web/Dockerfile` are `passing`, digest-pinned
+(`node:22-slim@sha256:d649c...`, `nginxinc/nginx-unprivileged:stable-alpine@sha256:44e36...`) —
+not to be modified unless a real CVE forces a base-image bump, in which case the digest is
+re-pinned (never a floating tag) and the image is smoke-rebuilt to confirm acceptance criteria
+still hold. Plan: run `trivy image` locally against both real images FIRST to see actual
+findings before writing any workflow/ignore-file content — per the task's explicit "don't force
+a pass" instruction. Reuse `build-images.yml`'s existing `build-api`/`build-web` jobs by adding
+`load: true` + a Trivy step to each, rather than a new workflow (avoids rebuilding the image a
+second time in a separate job).
+
+### Explicitly OUT of scope this sprint
+
+- Any resource under `apps/api/src/**`, `apps/web/src/**`, `libs/**` — permanent no-touch zone.
+- Editing the Dockerfiles UNLESS a real CRITICAL/HIGH CVE requires a base-image digest bump —
+  and even then, only the `ARG NODE_IMAGE=`/`ARG NGINX_IMAGE=` digest line, nothing structural.
+- `devops.cd_push_ecr_main` and later Tier 2 CD features — not touched here.
+- Branch protection / required-checks list — leaning not to touch; only add if acceptance
+  criteria clearly requires it (re-read: criteria say "job fails the PR", not "is a required
+  check" — required-check enforcement is a separate, repo-wide concern, not adding it here).
+- A permanent "build a broken image on purpose" step in the real workflow — criterion 3's proof
+  is a one-off local verification, not a CI fixture.
+
+### Done conditions (copied verbatim from `devops/feature-list.json` acceptance)
+
+- [ ] Trivy runs against both images on every PR, after devops.ci_build_images.
+- [ ] Job fails on any CRITICAL or HIGH severity finding not explicitly allowlisted.
+- [ ] A PR built from a deliberately outdated/vulnerable base image fails the check; the real
+      Dockerfiles pass.
+
+### Verification plan (real commands, run for real)
+
+- [ ] Local, real, BEFORE any code: `docker build -t scribe-api:local -f apps/api/Dockerfile .`
+      + `trivy image --severity CRITICAL,HIGH scribe-api:local` (no exit-code flag first, just to
+      see findings) — repeat for `scribe-web:local`.
+- [ ] `trivy image --exit-code 1 --severity CRITICAL,HIGH --ignorefile .trivyignore
+      scribe-api:local` — expect exit 0 on the real Dockerfile (same for `scribe-web:local`).
+- [ ] `docker build -t scribe-api:vuln-test -f - . <<< 'FROM node:18.0.0'` then `trivy image
+      --exit-code 1 --severity CRITICAL,HIGH scribe-api:vuln-test` — expect non-zero exit.
+- [ ] `actionlint .github/workflows/build-images.yml` clean before pushing.
+- [ ] Open the real feature PR — its own `pull_request` run is the real CI verify (both
+      build+scan jobs green on the real Dockerfiles).
+- [ ] `gh pr checks` — both jobs green.
+
+### Invariants that must still hold
+
+- [ ] No static AWS credentials introduced anywhere.
+- [ ] No `latest` tag introduced anywhere (including any base-image bump — always a digest).
+- [ ] No-touch zone respected.
+- [ ] Any `.trivyignore` entry has a comment justifying it — no blanket suppression.
+- [ ] No permanent "build vulnerable image" step added to the real workflow.
+
+### Definition of done
+
+- [ ] Every Done condition checked with real evidence.
+- [ ] Every verify command actually run, output recorded.
+- [ ] `devops/feature-list.json` → `passing` (or left `blocked`/`failing` with exact reason).
+- [ ] `devops/progress.md` + `devops/session-handoff.md` + this file updated in the same commit.
+
+## Superseded — original devops.ci_build_images contract (kept for the concrete approach; all
+boxes below are now checked, see "Sprint outcome" above)
 
 ### Context
 

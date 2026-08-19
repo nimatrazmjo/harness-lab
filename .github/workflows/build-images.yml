@@ -7,6 +7,14 @@ name: Build Images
 # backend (cache-from/cache-to: type=gha) so PR builds reuse layers instead of building cold
 # every time.
 #
+# devops.ci_image_scan_trivy: each job also loads its just-built image (`load: true`) into the
+# local Docker daemon and runs a real Trivy CRITICAL/HIGH scan against it in the same job — same
+# job, not a separate one, so Trivy scans the actual artifact this PR built rather than
+# rebuilding it a second time. Fails the job (`--exit-code 1`) on any unallowlisted finding;
+# `.trivyignore` (repo root) is the reviewed allowlist for genuine false positives / inapplicable
+# base-image findings, each entry commented with why — see that file's header for the real
+# CVEs found and fixed vs. the handful left allowlisted with justification.
+#
 # Both Dockerfiles build from the REPO ROOT (per their own header comments — they reach into
 # libs/shared-types and libs/ai via the pnpm workspace), so `context: .` here, not the app
 # subdirectory.
@@ -16,6 +24,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  TRIVY_VERSION: v0.74.0
 
 jobs:
   build-api:
@@ -34,10 +45,16 @@ jobs:
           context: .
           file: apps/api/Dockerfile
           push: false
-          load: false
+          load: true
           tags: scribe-api:ci
           cache-from: type=gha,scope=scribe-api
           cache-to: type=gha,mode=max,scope=scribe-api
+
+      - name: Install Trivy
+        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
+
+      - name: Scan scribe-api image for CRITICAL/HIGH CVEs
+        run: trivy image --exit-code 1 --severity CRITICAL,HIGH --ignorefile .trivyignore scribe-api:ci
 
   build-web:
     name: build-web
@@ -55,7 +72,13 @@ jobs:
           context: .
           file: apps/web/Dockerfile
           push: false
-          load: false
+          load: true
           tags: scribe-web:ci
           cache-from: type=gha,scope=scribe-web
           cache-to: type=gha,mode=max,scope=scribe-web
+
+      - name: Install Trivy
+        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
+
+      - name: Scan scribe-web image for CRITICAL/HIGH CVEs
+        run: trivy image --exit-code 1 --severity CRITICAL,HIGH --ignorefile .trivyignore scribe-web:ci

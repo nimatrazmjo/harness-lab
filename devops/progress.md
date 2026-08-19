@@ -18,11 +18,113 @@ Tier 0 is done except the two real-AWS items genuinely blocked on a pending scop
 (`terraform_networking_rds`, `terraform_compute_envs` — domain `test.nimat.dev` now decided,
 full 3-env (dev/staging/prod) rollout confirmed, but not yet dispatched — real ongoing-cost
 resources, needs explicit go-ahead each time per this workstream's pattern). All of Tier 0's
-other items (`dockerfile_api`, `dockerfile_web`, `terraform_backend`, `terraform_oidc_github`,
-`terraform_ecr`) are `passing` and merged. Tier 1 is underway: `ci_secret_scan` and
-`ci_build_images` are `passing` and merged; `ci_image_scan_trivy` is next.
+other items (`dockerfile_api`, `dockerfile_web`, `terraform_backend`, `terraform_oidc_github`)
+are `passing` and merged; `terraform_ecr`'s status has a discrepancy between this file and
+`devops/feature-list.json` noted separately below — not touched or resolved this session, flagged
+for the next session to reconcile. Tier 1: `ci_secret_scan`, `ci_build_images`, and now
+`ci_image_scan_trivy` are `passing`. `cd_push_ecr_main` (Tier 2) is next — nothing in this
+session touched Tier 2.
+
+**Note for next session:** `devops/feature-list.json` currently shows `devops.terraform_ecr` as
+`status: blocked` (with a detailed blocked-rubric note about an `ecr:TagResource` IAM gap), but
+this file's prior entries and `devops/session-handoff.md` (as last written before this session)
+both described it as `passing`/merged. Did not investigate or touch this discrepancy — out of
+scope for `devops.ci_image_scan_trivy` — but it should be reconciled (check the real AWS state
+via `aws ecr describe-repositories`) before `devops.cd_push_ecr_main` is started, since that
+feature `dependsOn` it.
 
 ## Log
+
+### 2026-08-18 — devops.ci_image_scan_trivy: passing — found + fixed real CVEs, not suppressed
+
+Ran `trivy image --severity CRITICAL,HIGH scribe-api:local` / `scribe-web:local` for real,
+locally, before writing any workflow (per the task's explicit "don't force a pass" instruction).
+`scribe-web:local` was already clean (0 findings). `scribe-api:local` had 66 real CRITICAL/HIGH
+findings across 3 categories:
+
+1. **22 Debian OS-package findings** (bsdutils, gzip, libacl1, libblkid1/libmount1/libsmartcols1/
+   libuuid1/mount/util-linux/util-linux-extra, libtinfo6/ncurses-base/ncurses-bin, perl-base x8,
+   zlib1g) — all inherited from `node:22-slim`'s Debian 12.15 layer, all with `FixedVersion: -`
+   (no patched package version exists yet). Confirmed the pinned digest
+   (`sha256:d649c27d...`) is already the current `node:22-slim` tag's digest — `docker pull
+   node:22-slim` resolves to the exact same digest, so there is no newer digest to bump to.
+   Checked each CVE's `Status` field: mix of `affected` (no fix yet), `fix_deferred` (Debian
+   deliberately delayed), and one `will_not_fix` (zlib1g's CVE-2023-45853 — the well-known
+   MiniZip/contrib CVE; Debian's zlib1g package doesn't build/ship that component at all, so the
+   vulnerable code path isn't present in the actual shared library). None of these packages
+   (mount/gzip/perl/ncurses/util-linux) are ever invoked by this image's runtime — the container
+   only ever runs `node apps/api/dist/main.js`.
+
+2. **19 findings from leaked devDependencies** (vite, vitest, brace-expansion, glob, ip-address,
+   lodash, multer, picomatch, sigstore, tar, tmp) — traced to a REAL bug in
+   `apps/api/Dockerfile`: `RUN CI=true pnpm install --frozen-lockfile --prod` does NOT actually
+   remove devDependencies already present on disk from the earlier full install (confirmed via
+   `pnpm ls --prod -r --depth -1` inside the built image — vite/vitest/esbuild were still
+   resolvable) — it only controls what gets newly fetched, not pruning. `libs/ai` and
+   `libs/shared-types` (apps/api's own workspace deps) both carry `vitest` as a devDependency for
+   their own tests, and the whole `/repo/node_modules/.pnpm` store gets copied into the runtime
+   image wholesale. **Fix:** added `&& pnpm prune --prod` after the existing install step —
+   confirmed via direct inspection this actually deletes the devDependency-only packages from
+   `.pnpm`, while `@nestjs/core` and other real prod deps still resolve correctly.
+
+3. **25 findings in npm's own bundled dependency tree** (tar, sigstore, ip-address,
+   brace-expansion, picomatch — separate from #2's copies, these live at
+   `/usr/local/lib/node_modules/npm/node_modules/...`) — `node:22-slim` ships the `npm` CLI
+   itself (~18MB), which this image never invokes (`CMD` is `node`, never `npm`/`npx`). **Fix:**
+   `RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx` in the
+   runtime stage (before `USER node`, since root owns those files) — removes the unused CLI
+   entirely rather than ignoring its CVEs, so the vulnerable code isn't in the image at all.
+
+After #2/#3's fix, the remaining Node.js findings were `multer` (2.0.2, 4 real CVEs, all DoS,
+fixed >=2.2.0 — a genuine transitive prod dep via `@nestjs/platform-express`) and `lodash`
+(4.17.21, 1 CVE, template-injection RCE, fixed 4.18.0 — transitive via `@nestjs/config`) — both
+real, exploitable-in-principle, not devDependencies. Fixed via `pnpm-workspace.yaml`'s
+`overrides` field (NOT `package.json`'s `pnpm.overrides` — pnpm 11 moved that setting and warns
+`[WARN] The "pnpm" field in package.json is no longer read by pnpm` when you try the old
+location) forcing `multer: ">=2.2.0"` / `lodash: ">=4.18.0"`. Regenerated `pnpm-lock.yaml` via
+plain `pnpm install` (not `--frozen-lockfile`, since the override changes the resolution) —
+diff is clean, touches only the two packages' resolved versions + an `overrides:` block in the
+lockfile header, nothing under `apps/*/src` or `libs/**`.
+
+After all three fixes, `scribe-api:local` dropped from 66 findings to 22 (all in category 1, the
+genuinely-unfixable-right-now Debian OS packages). Re-verified BOTH Dockerfile acceptance
+criteria still hold after the changes (this is a real change beyond a base-image digest bump, so
+re-checked rather than assumed): fresh `--no-cache` build succeeds, `curl -f /health` →
+`{"status":"ok","db":true}`, `whoami` → `node` (non-root), same for `scribe-web:local` (nginx
+image untouched, was already clean).
+
+`.trivyignore` (repo root, new file) allowlists the 13 remaining CVE IDs (22 findings), each
+with its own comment: which packages, Debian's status (affected/fix_deferred/will_not_fix), and
+why it's inapplicable to this image's actual runtime behavior. This is NOT a blanket
+suppression — it's what's left after three rounds of real remediation.
+
+`.github/workflows/build-images.yml` extended (not a new workflow, per
+`devops/session-handoff.md`'s note) — both `build-api`/`build-web` jobs changed `load: false` →
+`load: true` and gained two new steps: install Trivy (pinned `v0.74.0`, matching the local CLI
+version used for all verification above) via the official install script, then
+`trivy image --exit-code 1 --severity CRITICAL,HIGH --ignorefile .trivyignore <image>:ci` in the
+same job (scans the artifact the job just built, no rebuild). `actionlint` clean.
+
+All three literal `verify` commands run for real, end-to-end, after every fix above:
+- `trivy image --exit-code 1 --severity CRITICAL,HIGH --ignorefile .trivyignore scribe-api:local`
+  → **exit 0**. Same command against `scribe-web:local` → **exit 0** (was already clean).
+- `docker build -t scribe-api:vuln-test -f - . <<< 'FROM node:18.0.0'` → builds successfully
+  (ancient base, no app code needed for this proof).
+- `trivy image --exit-code 1 --severity CRITICAL,HIGH scribe-api:vuln-test` (no ignorefile) →
+  **exit 1**, 62 CRITICAL + 63 HIGH real findings (unpatched Node 18.0.0 + npm's own ancient
+  bundled deps). Confirms the check has teeth — it isn't just green because nothing gets scanned.
+
+Cleaned up the throwaway `scribe-api:vuln-test` and intermediate `scribe-api-build-stage` images
+locally afterward — this proof was explicitly scoped as a one-off local verification, not
+something that lives in CI (per the task's own instructions).
+
+No AWS touched, no `apps/api/src/**`/`apps/web/src/**`/`libs/**` edited (only
+`apps/api/Dockerfile`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `.trivyignore`, and the workflow
+file — dependency-manifest/infra files, not application source). No `latest` tag anywhere. No
+branch-protection change (acceptance criteria only requires the job to fail the PR, which
+`pull_request`-triggered CI already does independent of required-status-check enforcement — left
+that alone per the task's explicit lean-not-to-touch guidance). Branch
+`feat/devops-ci-image-scan-trivy`, PR opened (not merged, per this workstream's rule).
 
 ### 2026-08-18 — devops.ci_build_images: passing (verified after an early merge)
 

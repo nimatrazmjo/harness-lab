@@ -43,16 +43,30 @@ RUN pnpm --filter @scribe/shared-types run build \
     && pnpm --filter @scribe/ai run build \
     && pnpm --filter api run build
 
-# Re-install prod-only: strips devDependencies (typescript, ts-node, @nestjs/cli, jest, ...)
-# from node_modules workspace-wide. Already-built dist/ output is untouched by this.
+# Re-install prod-only, then explicitly prune: `pnpm install --frozen-lockfile --prod` alone
+# does NOT remove devDependencies that are already on disk from the full install above (it only
+# controls what gets newly fetched) — confirmed by inspection: vite/vitest/esbuild (apps/web's
+# and libs/*'s devDependencies) survived that step alone and were still being copied into the
+# runtime image, tripping CRITICAL/HIGH CVEs in Trivy for tooling this image never runs
+# (devops.ci_image_scan_trivy). `pnpm prune --prod` is the command that actually walks the
+# workspace and deletes devDependency-only packages from node_modules/.pnpm.
 # CI=true: non-interactive build, no TTY to confirm the modules-dir purge.
-RUN CI=true pnpm install --frozen-lockfile --prod
+RUN CI=true pnpm install --frozen-lockfile --prod && pnpm prune --prod
 
 # ---------------------------------------------------------------------------------------------
 # Stage 2: runtime — slim image, only compiled JS + prod node_modules + package manifests.
 # No TS source, no test/ dirs, no tsconfig, no build tooling, no apps/web — acceptance #1.
 # ---------------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS runtime
+
+# node:22-slim bundles the npm CLI (/usr/local/lib/node_modules/npm) — this image only ever
+# runs `node apps/api/dist/main.js` (see CMD below), never npm/npx, so that bundled CLI and its
+# own vendored dependency tree (tar, sigstore, ip-address, brace-expansion, picomatch, ...) are
+# pure unused attack surface, not something this app calls. Trivy correctly flagged real
+# CRITICAL/HIGH CVEs in that bundled npm tree (devops.ci_image_scan_trivy) — removing the CLI
+# outright is the honest fix (less code shipped, not a suppressed finding); root still owns
+# these files so this must run before `USER node` below.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 ENV NODE_ENV=production
 WORKDIR /repo
