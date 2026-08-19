@@ -18,17 +18,54 @@ name: Build Images
 # Both Dockerfiles build from the REPO ROOT (per their own header comments — they reach into
 # libs/shared-types and libs/ai via the pnpm workspace), so `context: .` here, not the app
 # subdirectory.
+#
+# devops.cd_push_ecr_main: on push to main ONLY (never a PR build — `push-api`/`push-web` below
+# are both gated `if: github.event_name == 'push'`), after this same run's `secret-scan-main` +
+# the `build-api`/`build-web` jobs (which already include the Trivy image-scan gate above) have
+# all succeeded for THIS commit, authenticate to AWS via OIDC and push the just-scanned image to
+# ECR tagged with the immutable git SHA — never `latest`.
+#
+# Folded into this one file (rather than a separate workflow reacting via `workflow_run`) so the
+# push jobs can use a real `needs:` dependency on secret-scan-main + build-api/build-web in the
+# SAME run — GitHub Actions `needs:` only works within one workflow file, and `workflow_run`
+# can't cleanly express "wait for two independent workflows to both succeed for this exact SHA"
+# without extra polling/race-condition risk. `secret-scan.yml` itself stays untouched (still the
+# PR-required check) — `secret-scan-main` below is a deliberate, push-only re-run of the same
+# gitleaks check against the actual merge-commit SHA, since a merge commit is a new SHA the PR's
+# own secret-scan run never scanned.
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 env:
   TRIVY_VERSION: v0.74.0
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "404063516240"
+  OIDC_ROLE_ARN: arn:aws:iam::404063516240:role/scribe-github-actions-deploy
 
 jobs:
+  secret-scan-main:
+    name: secret-scan-main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-api:
     name: build-api
     runs-on: ubuntu-latest
@@ -82,3 +119,83 @@ jobs:
 
       - name: Scan scribe-web image for CRITICAL/HIGH CVEs
         run: trivy image --exit-code 1 --severity CRITICAL,HIGH --ignorefile .trivyignore scribe-web:ci
+
+  push-api:
+    name: push-api
+    needs: [secret-scan-main, build-api]
+    # Explicit `if:` (not the default success()-over-needs) so this job is unambiguously skipped
+    # on every PR run and only even considers running on a real push to main, then additionally
+    # requires every gate to have actually succeeded — not just "not failed" (a skipped
+    # secret-scan-main on a PR run must never be read as a pass here).
+    if: |
+      always() &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.secret-scan-main.result == 'success' &&
+      needs.build-api.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Assume scribe-github-actions-deploy via OIDC (no static keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push scribe-api tagged with the git SHA (never latest)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/scribe-api:${{ github.sha }}
+          cache-from: type=gha,scope=scribe-api
+          cache-to: type=gha,mode=max,scope=scribe-api
+
+  push-web:
+    name: push-web
+    needs: [secret-scan-main, build-web]
+    if: |
+      always() &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      needs.secret-scan-main.result == 'success' &&
+      needs.build-web.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Assume scribe-github-actions-deploy via OIDC (no static keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.OIDC_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push scribe-web tagged with the git SHA (never latest)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/scribe-web:${{ github.sha }}
+          cache-from: type=gha,scope=scribe-web
+          cache-to: type=gha,mode=max,scope=scribe-web
