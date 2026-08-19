@@ -192,7 +192,7 @@
             "id": "devops.ci_build_images",
             "tier": 1,
             "title": "CI: build both images on every PR (not pushed)",
-            "status": "failing",
+            "status": "passing",
             "description": "GitHub Actions builds scribe-api and scribe-web via Docker Buildx on every PR, with layer caching, purely to validate the Dockerfiles compile — nothing is pushed to a registry from a PR build.",
             "acceptance": [
                 "Both images build successfully on every PR.",
@@ -204,7 +204,7 @@
                 "gh run view <run-id> --log | grep -qv 'docker push'  # confirm no push happened on a PR run"
             ],
             "dependsOn": ["devops.dockerfile_api", "devops.dockerfile_web"],
-            "rubric": "DevOps: CI — build validation"
+            "rubric": "DevOps: CI — build validation. Passing 2026-08-18: workflow merged (PR #14) before the implementing agent finished its own verify/status-flip step (it was still waiting on its own PR's CI run when the PR got merged) — independently re-verified after the fact directly against the merged run: `gh pr checks 14` showed both `build-api`/`build-web` green, `gh run view --log` on the run confirmed zero `docker push` invocations, and the workflow file confirms `push: false`/`load: false` plus `cache-from`/`cache-to: type=gha` on both jobs."
         },
         {
             "id": "devops.ci_image_scan_trivy",
