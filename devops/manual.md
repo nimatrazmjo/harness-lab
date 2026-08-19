@@ -529,6 +529,47 @@ connection times out) are fully verified for real, for all 3 environments. Once 
 re-run the same throwaway-EC2-probe mechanism (documented in
 `devops/sprint-contract.md`/`devops/progress.md`'s 2026-08-19 entries) to close this out.
 
+**RE-ATTEMPTED 2026-08-19 (later same day) — still denied, fix has NOT landed.** A human
+reported having applied this exact minimal fix via a newly-set-up scoped "grantor" IAM role
+(assumed via their own low-privilege user + MFA, not root). Re-ran the identical mechanism from
+scratch (new throwaway EC2 probe, same design: Amazon Linux 2023, SSM-only, no SSH/key pair,
+IAM role with only `AmazonSSMManagedInstanceCore`, attached to all 3 envs' compute SGs) —
+`terraform plan` confirmed zero drift beforehand. `aws ssm send-command --document-name
+AWS-RunShellScript --instance-ids <probe-id> ...` failed with the **exact same** error as
+before, word-for-word:
+
+```
+An error occurred (AccessDeniedException) when calling the SendCommand operation: User:
+arn:aws:iam::404063516240:user/devops-agent is not authorized to perform: ssm:SendCommand on
+resource: arn:aws:ssm:us-east-1::document/AWS-RunShellScript because no identity-based policy
+allows the ssm:SendCommand action
+```
+
+The message's phrasing ("no identity-based policy allows...", not "...no permissions boundary
+allows...") indicates the gap is still in the identity policy itself (`scribe-devops-infra`),
+not a side effect of the new permissions boundary — i.e. the Step 10 Gap C statement was never
+actually added, or was added to a different policy/resource than documented here. `devops-agent`
+still can't self-inspect its own attached policy versions to determine which
+(`iam:ListPolicyVersions` on `scribe-devops-infra` also denied, consistent with the long-standing
+IAM self-inspection gap noted in `devops/session-handoff.md`'s "Known gaps").
+
+**Also newly observed this re-attempt:** `ssm:DescribeInstanceInformation` (used to confirm SSM
+registration before attempting `SendCommand`) is *also* denied for `devops-agent` even when the
+probe instance is tagged `deploy=true` — `AccessDeniedException ... not authorized to perform:
+ssm:DescribeInstanceInformation on resource: arn:aws:ssm:us-east-1:404063516240:*`. This is a
+list/describe action with no single taggable resource in the request, so `SsmDeploy`'s
+`ssm:resourceTag/deploy=true` condition likely can never be satisfied for it at all — the same
+category of problem as Gap C's document-ARN issue, just on a different action. Not blocking
+(the real acceptance criterion is `SendCommand`, tested directly instead), but worth folding into
+whatever grant eventually lands: either an unconditioned `ssm:DescribeInstanceInformation`
+statement, or accept that registration can only be inferred indirectly (e.g. `SendCommand`
+itself returning `InvalidInstanceId` vs. actually dispatching).
+
+Probe instance (`i-0cdad236b7d671e70`) terminated and its IAM role/instance profile
+(`scribe-pgvector-probe`) deleted immediately after the denial — nothing left running. Feature
+left `blocked`; see `devops/feature-list.json`'s rubric and `devops/progress.md`'s 2026-08-19
+re-attempt entry for full evidence.
+
 ---
 
 ## Log
