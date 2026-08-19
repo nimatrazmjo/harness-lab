@@ -31,6 +31,7 @@
             "tier": 0,
             "title": "Production Dockerfile for apps/api",
             "status": "passing",
+            "fixPrompt": "Add multi-stage apps/api/Dockerfile: node:22-slim pinned by sha256 digest, non-root node user, final image has no TS source/dev deps. node:22 (not the workspace's engines >=20 floor) because pnpm@11.13.1 itself requires Node >=22.13 to run. Add apps/api/.env.example (docker-smoke-only values) and root .dockerignore. Verify: build succeeds, container serves a real GET /health (200, live DB ping), no TS source/dev deps in the final image.",
             "description": "Multi-stage Dockerfile for the NestJS API: build stage compiles TS, final stage is a slim runtime image, non-root user, base image pinned by digest (not a floating tag).",
             "acceptance": [
                 "Multi-stage build — final image contains no dev dependencies, no TS source, no build tooling.",
@@ -52,6 +53,7 @@
             "tier": 0,
             "title": "Production Dockerfile for apps/web",
             "status": "passing",
+            "fixPrompt": "Add multi-stage apps/web/Dockerfile: node:22-slim (same digest-pinned base/Node version as apps/api/Dockerfile, same reason: pnpm@11.13.1 needs Node >=22.13) compiles the Vite bundle, then nginx-unprivileged:stable-alpine (sha256-pinned, built-in non-root user, listens on 8080) serves only the built dist/. Add apps/web/nginx.container.conf.template mirroring infra/nginx.conf's /api/* rewrite + SSE proxy_buffering off rule for a containerized context, API_UPSTREAM defaulted to a literal IP so nginx never fails to start without a linked API container.",
             "description": "Multi-stage Dockerfile for the Vite/React app: build stage runs `vite build`, final stage serves the static bundle via a slim nginx image, non-root, digest-pinned.",
             "acceptance": [
                 "Multi-stage build — final image is nginx serving only the built dist/, no node_modules or source.",
@@ -73,6 +75,7 @@
             "tier": 0,
             "title": "Terraform remote state backend",
             "status": "passing",
+            "fixPrompt": "Bootstrap Terraform remote state: versioned+encrypted S3 bucket + DynamoDB lock table, provisioned outside the main Terraform config to avoid a chicken-and-egg problem. Resolve IAM permission gaps for devops-agent as they surface (took 3 rounds, see devops/manual.md), then verify for real against live AWS — including an actual concurrent-apply lock test (second plan blocked with 'Error acquiring the state lock', succeeds after the first releases it).",
             "description": "S3 bucket (versioned, encrypted) + DynamoDB lock table for Terraform state, bootstrapped once outside the main Terraform config to avoid a chicken-and-egg problem. Local state never committed.",
             "acceptance": [
                 "State bucket has versioning + SSE enabled, blocks public access.",
@@ -92,6 +95,7 @@
             "tier": 0,
             "title": "GitHub Actions federated AWS auth (OIDC, no static keys)",
             "status": "passing",
+            "fixPrompt": "Add IAM OIDC identity provider trusting token.actions.githubusercontent.com plus an IAM role GitHub Actions assumes via aws-actions/configure-aws-credentials, trust policy scoped to this repo + specific ref patterns, least-privilege role policy (no wildcard admin). Run oidc-smoke-test.yml end-to-end via a real pull_request trigger and fix the bugs that surfaced: a YAML syntax error silently failing every run since the workflow's creation, an OIDC trust-policy subject-claim mismatch against GitHub's actual immutable-ID format for this repo, and a credential-check logic bug conflating env-var presence with static-key usage.",
             "description": "IAM OIDC identity provider trusting token.actions.githubusercontent.com, plus an IAM role GitHub Actions assumes via aws-actions/configure-aws-credentials. Trust policy scoped to this repo and specific ref patterns (main, pull_request) — not org-wide. Policy is least-privilege: ecr:*  scoped to the two repos, ssm:SendCommand scoped to the deploy tag, no wildcard admin.",
             "acceptance": [
                 "No AWS access key / secret key exists anywhere in GitHub secrets or the codebase — auth is 100% OIDC (AGENTS.md [SECRETS]).",
@@ -174,6 +178,7 @@
             "tier": 1,
             "title": "CI: hardcoded-secret scan as a required PR check",
             "status": "passing",
+            "fixPrompt": "Promote scripts/check-no-committed-secrets.sh (gitleaks) into an automated, required GitHub Actions PR check instead of a manual local script.",
             "description": "Promotes the existing scripts/check-no-committed-secrets.sh (gitleaks, currently a local/manual script backing infra.env_secrets) into an actual required GitHub Actions check on every PR — not just something an agent is supposed to remember to run.",
             "acceptance": [
                 "gitleaks (or equivalent) runs on every PR via GitHub Actions.",
@@ -193,6 +198,7 @@
             "tier": 1,
             "title": "CI: build both images on every PR (not pushed)",
             "status": "passing",
+            "fixPrompt": "Add a GitHub Actions workflow validating both production Dockerfiles compile via Buildx with GHA layer caching on every PR — push:false/load:false, no docker push step on a PR run. Push-on-main is a separate later feature.",
             "description": "GitHub Actions builds scribe-api and scribe-web via Docker Buildx on every PR, with layer caching, purely to validate the Dockerfiles compile — nothing is pushed to a registry from a PR build.",
             "acceptance": [
                 "Both images build successfully on every PR.",
@@ -211,6 +217,7 @@
             "tier": 1,
             "title": "CI: Trivy vulnerability scan on both built images",
             "status": "passing",
+            "fixPrompt": "Extend build-images.yml: load:true the built image and run Trivy (CRITICAL/HIGH) in the same job. Real fixes required by the 66 findings Trivy surfaced against scribe-api:local, not suppression: apps/api/Dockerfile's `pnpm install --prod` wasn't pruning devDependencies already on disk — add `pnpm prune --prod`, eliminating vite/vitest/esbuild CVEs; remove the bundled npm CLI from the runtime stage (image only ever runs `node`) eliminating its vendored tar/sigstore/ip-address CVEs; pnpm-workspace.yaml overrides bump multer >=2.2.0 / lodash >=4.18.0 (real transitive prod deps). Remaining Debian OS-package CVEs with no upstream fix, never invoked by this image's runtime, go in root .trivyignore, each with its own justification comment — not a blanket suppression.",
             "description": "Trivy scans both PR-built images for CRITICAL/HIGH CVEs. Job fails the PR if any are found, with an explicit, reviewed allowlist mechanism (a .trivyignore entry requires a comment linking to why it's accepted) for genuine false positives — not a blanket suppression.",
             "acceptance": [
                 "Trivy runs against both images on every PR, after devops.ci_build_images.",

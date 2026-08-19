@@ -59,7 +59,7 @@ directly. If a change would violate one, stop and flag it instead.
   **only** through an explicit admin guard. This is a security invariant — cover it with a
   test that must stay green.
   **Clarified scope (human sign-off 2026-08-17):** this governs direct access to another
-  provider's *encounter records*. It does **not** forbid patient-scoped clinical context —
+  provider's _encounter records_. It does **not** forbid patient-scoped clinical context —
   a returning patient's prior assessment/plan (fetched via the backend history tool during
   generation, see [CONTEXT-INJECTION]) may inform generation for **any** provider currently
   treating that same patient, not just the original author. This mirrors continuity of care
@@ -252,6 +252,10 @@ isolation "works."
 4. `evaluator-rubric.md` scored **PASS** (or an accepted CONDITIONAL) — ideally a separate pass.
 5. `status` flipped to `passing` in `feature-list.json` and committed on a branch/PR.
 6. `progress.md` updated — a dated entry with what changed and the next feature.
+7. If this feature is passing after a prior failure, set `fixPrompt` in `feature-list.json` to
+   the exact prompt that fixed it — this **replaces** any prior value, it never accumulates into
+   a log. Each replacement should be cleaner and more structured than what it replaces, and
+   scoped only to this feature: no unrelated fixes riding along in the same edit.
 
 ---
 

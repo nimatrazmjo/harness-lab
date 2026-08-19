@@ -284,6 +284,7 @@
             "tier": 1,
             "title": "Admin route + role-gated shell",
             "status": "passing",
+            "fixPrompt": "Add AdminRoute + AdminShell: role-gated /admin route as the frontend attachment point for the backend admin surface (already guarded by RolesGuard). A provider hitting /admin must be blocked/redirected, enforced by both API guard and frontend route gate.",
             "description": "A dedicated /admin area exists, reachable only by the admin role, with a nav shell that the rest of the admin features (view-all, roster, templates) attach their pages to. This is the concrete first step behind ‘we don’t have an admin route to list all’ — added as its own small feature so it's independently buildable and testable, rather than bundled inside admin.view_all.",
             "acceptance": [
                 "An /admin route exists and renders a distinct admin shell (nav/layout), separate from the provider workspace.",
@@ -302,6 +303,7 @@
             "tier": 1,
             "title": "Admin: view all encounters (filterable)",
             "status": "passing",
+            "fixPrompt": "Add admin DTOs (roster + encounter filter) in shared-types. Add GET /admin/encounters (filterable by providerId/from/to) behind AdminController's existing class-level @Roles('admin') guard.",
             "description": "Admins view all encounters across providers, filterable by provider and date range.",
             "acceptance": [
                 "Admin-only view lists all encounters across providers.",
@@ -317,6 +319,7 @@
             "tier": 1,
             "title": "Admin: manage provider roster",
             "status": "passing",
+            "fixPrompt": "Add GET/POST /admin/providers and PATCH /admin/providers/:id/deactivate behind AdminController's admin guard. Provider creation hashes via AuthService.hashPassword; ProviderSummary DTO structurally excludes password. Define deactivation behavior: only flips is_active, never touches provider data, session ends on their next authenticated request (JwtStrategy re-checks is_active per request), not immediately — add a test proving an already-issued unexpired JWT gets 401'd on the next call after deactivation.",
             "description": "Admins can add and deactivate provider accounts.",
             "acceptance": [
                 "Admin can create a new provider account.",
@@ -332,6 +335,7 @@
             "tier": 1,
             "title": "Admin: template library CRUD",
             "status": "passing",
+            "fixPrompt": "Require @Roles('admin') on POST/PATCH/DELETE /templates; leave GET open to any authenticated provider. Same controller, RolesGuard already handles per-method — no separate admin controller needed.",
             "description": "Admins create, edit, and delete note templates (structured prompts that shape generation for different encounter types).",
             "acceptance": [
                 "Admin can create, edit, and delete templates.",
@@ -346,6 +350,7 @@
             "tier": 1,
             "title": "Provider selects template; AI behaves differently",
             "status": "passing",
+            "fixPrompt": "Add template-apply.e2e-spec.ts: prove an identical transcript under two different templates produces genuinely different Plan text carrying each template's own name/instructions, no template selected produces plain output, and a client-supplied templateApplied payload on the generate request is structurally ignored (ScribeController has no @Body() param to carry it).",
             "description": "Providers select a template before generating; the AI visibly behaves differently depending on the active template.",
             "acceptance": [
                 "Provider can pick a template before Generate Note.",
@@ -361,6 +366,7 @@
             "tier": 1,
             "title": "Live template updates (no refresh)",
             "status": "passing",
+            "fixPrompt": "Add template-live-update.e2e-spec.ts: prove an admin edit to a template's promptInstructions takes effect on the same open encounter's very next generation, no new encounter and no page refresh needed (TemplatesRepository.findById has no caching layer), plus a regression guard that a note saved before the edit keeps its original plan text forever (VERSION-IMMUTABILITY).",
             "description": "If an admin updates the active template while a provider has the workspace open, the provider's next generation uses the new template without a page refresh.",
             "acceptance": [
                 "Admin edits a template; the provider's next generation uses the new version.",
@@ -393,7 +399,8 @@
                 "apps/web/src/features/admin/__tests__/audit-log-page.test.tsx"
             ],
             "dependsOn": ["admin.shell_route", "admin.view_all", "admin.roster", "admin.templates_crud", "audit.trail"],
-            "rubric": "Admin dashboard: nav must lead to working pages, not placeholders"
+            "rubric": "Admin dashboard: nav must lead to working pages, not placeholders",
+            "fixPrompt": "Wire the /admin shell nav (Encounters/Roster/Templates/Audit Log) to real nested routes + pages calling the existing backend endpoints (GET /admin/encounters, GET/POST /admin/providers + deactivate, templates CRUD, GET /admin/audit-logs). /admin index redirects to /admin/encounters, AdminRoute's guard still covers every nested route. No nav item may lead to a dead/placeholder page."
         },
         {
             "id": "ui.professional_redesign",
@@ -419,13 +426,15 @@
                 "Manual: live browser walkthrough of login / encounter list / workspace (incl. a generated note) / all 4 admin pages, screenshotted before and after"
             ],
             "dependsOn": ["admin.nav_wired", "note.inline_edit", "encounter.input"],
-            "rubric": "UI quality: professional, high-trust clinical tool feel (AGENTS.md §1)"
+            "rubric": "UI quality: professional, high-trust clinical tool feel (AGENTS.md §1)",
+            "fixPrompt": "Do the professional design pass: add a real type scale, btn-secondary/btn-danger button variants, a small BrandMark icon, AutoGrowTextarea for SOAP sections (replacing fixed-height monospace textareas), subtle (not full-invert) row hover, styled select/date controls, stretch-aligned workspace grid. Add a persistent patient-identity header to the encounter workspace — GET /encounters/:id must return patient {firstName,lastName,dob}. Fix encounters.mapper.ts to normalize patient.dob the same way pdf-export.service.ts already does (pg returns date columns as a JS Date at runtime despite the type saying string, which rendered 'Invalid Date')."
         },
         {
             "id": "session.draft_persist",
             "tier": 1,
             "title": "Draft persistence across refresh",
             "status": "passing",
+            "fixPrompt": "Add draft DTOs (SaveDraftRequest, DraftResponse) in shared-types. Add backend PUT/GET /encounters/:id/draft upserting a single row per encounter (drafts table's UNIQUE(encounter_id), already existed unused since Tier 0), tenant-gated through the same EncountersService.getForUser check as every other encounter-scoped route. NotesService.save() deletes the draft row after a real save, strictly after the note_versions INSERT. Frontend: EncounterWorkspacePage fetches the draft on mount and debounce-saves on every note change, guarded by the generating flag so no draft write fires mid-SSE-stream.",
             "description": "A mid-encounter draft (transcript entered, note not yet saved) is restored from the database after a refresh or browser close/reopen.",
             "acceptance": [
                 "In-progress draft state is written to RDS as it changes.",
@@ -440,6 +449,7 @@
             "tier": 1,
             "title": "Cross-device draft restore",
             "status": "passing",
+            "fixPrompt": "Add draft-cross-device.e2e-spec.ts: two independent logins for the same provider (zero shared client state) see the identical draft, and an edit from one is visible from the other on next fetch — proves draft state is keyed to provider+encounter in RDS, not the browser (backend already added by session.draft_persist).",
             "description": "Logging in from a different browser/device restores the same in-progress draft state.",
             "acceptance": [
                 "Draft state is keyed to the provider + encounter in RDS, not to the browser.",
@@ -454,6 +464,7 @@
             "tier": 1,
             "title": "Non-happy-path: no clinical content",
             "status": "passing",
+            "fixPrompt": "Add edge-no-content.e2e-spec.ts hitting the real POST /scribe/generate route with empty/garbage transcript: assert the stream contains only an insufficient_content frame (no token/done frames), encounter status stays 'draft', and no note_versions row is written. Complements the existing hasClinicalContent() unit test with live HTTP coverage.",
             "description": "A transcript with no clinically meaningful content is handled gracefully — the AI does not fabricate a SOAP note.",
             "acceptance": [
                 "Empty/garbage clinical input returns a clear 'insufficient content' response.",
@@ -469,6 +480,7 @@
             "tier": 1,
             "title": "Non-happy-path: save with expired session",
             "status": "passing",
+            "fixPrompt": "Add edge-expired-save.e2e-spec.ts: a save attempt with an invalid/expired token fails cleanly (401), writes zero note_versions rows, and never touches the already-persisted draft; a fresh login retrieves the identical draft and completes the save. Real 8h JWT expiry isn't waitable in a test — an invalid token exercises the same JwtStrategy rejection path.",
             "description": "A provider attempting to save while their session has expired is handled without data loss.",
             "acceptance": [
                 "An expired-session save does not lose the provider's work.",
@@ -484,6 +496,7 @@
             "tier": 1,
             "title": "Audit log of saves and admin actions",
             "status": "passing",
+            "fixPrompt": "Add AuditLog/AuditLogFilter DTOs in shared-types. Wire the existing AuditService.log()/listAll() (previously only called from NotesService.save()) into the admin write paths that don't call it yet: AdminService.createProvider/deactivateProvider, TemplatesController create/update/delete — metadata scoped to structural facts only (email, role, version number, changed field names), never a password or clinical content. Expose listAll() via GET /admin/audit-logs (admin-only, same @Roles('admin') gate), filterable by actor/action/date-range, joining providers for actor name. Evaluator-required fix: add the missing date-range filter test.",
             "description": "Audit logs capture who did what and when for note saves and admin actions, stored in RDS.",
             "acceptance": [
                 "Note saves and admin actions (roster/template changes) write audit rows with actor, action, target, timestamp.",
@@ -498,6 +511,7 @@
             "tier": 2,
             "title": "Pioneer: version diff view",
             "status": "passing",
+            "fixPrompt": "Add a frontend-only version diff view: hand-rolled LCS line-diff (no external dependency) rendered per SOAP section plus a set-diff on icd10Codes, with two compare dropdowns in EncounterWorkspacePage that render the diff panel once both versions are selected. Reuses note.version_history's existing endpoint — no backend change needed.",
             "description": "A diff view between note versions so providers can see exactly what changed. Cheap to add given immutable versions already exist.",
             "acceptance": [
                 "Provider can select two versions and see a highlighted diff.",
@@ -512,6 +526,7 @@
             "tier": 2,
             "title": "Pioneer: provider writing-style learning",
             "status": "passing",
+            "fixPrompt": "Add deterministic provider writing-style learning: scan a provider's own recently saved notes for a real, repeated 'pt' vs 'patient' abbreviation preference and apply it to their next generated note. No LLM call, no adaptation without a clear repeated pattern, byte-identical default output otherwise.",
             "description": "The AI adapts to how a specific provider tends to phrase their notes over time, based on their history in the database.",
             "acceptance": [
                 "Generation reflects a provider's prior phrasing patterns drawn from their saved notes.",
@@ -526,6 +541,7 @@
             "tier": 2,
             "title": "Pioneer: clinical red-flag flagging",
             "status": "passing",
+            "fixPrompt": "Add a deterministic regex-based clinical red-flag detector (no LLM call, tenant-scoped endpoint) plus a frontend advisory banner that fetches on mount and after each debounced transcript save (awaited, so the scan can't race the save); generate button stays enabled regardless of flags. Evaluator-required fixes: match 'difficulty breathing' as a literal phrase, and detect plural seizure/convulsion forms.",
             "description": "Automatically flag clinical red flags in the transcript before note generation.",
             "acceptance": [
                 "Red-flag terms/patterns are surfaced to the provider before generation.",
@@ -540,6 +556,7 @@
             "tier": 2,
             "title": "Pioneer: bulk patient PDF export",
             "status": "passing",
+            "fixPrompt": "Add GET /patients/:id/export: bulk PDF export of a patient's full encounter history via pdfkit, tenant-scoped (provider sees own encounters only, admin sees all), audit-logged, no fabricated content for encounters without a saved note. Evaluator-required fixes: sanitize the exported filename (was crashing for non-Latin-1 patient names), and document audit-at-generation-success rather than chasing an unachievable delivery-confirmation guarantee.",
             "description": "Bulk export of all encounters for a given patient across all visits as a single structured PDF.",
             "acceptance": [
                 "A patient's encounters export to one structured, readable PDF.",
@@ -554,6 +571,7 @@
             "tier": 1,
             "title": "Match returning patients",
             "status": "passing",
+            "fixPrompt": "Add patient-match.e2e-spec.ts proving same first+last+dob links to one patient record across encounters and across providers; different DOB or name never merges. The matching behavior already existed via PatientsRepository dedup from Tier 0 — this adds the dedicated e2e coverage feature-list.json requires.",
             "description": "Detect when an encounter is for a patient who already has saved notes, matched by first name, last name, and DOB.",
             "acceptance": [
                 "Starting an encounter for an existing patient (first+last+DOB) links to that patient.",
@@ -568,6 +586,7 @@
             "tier": 1,
             "title": "Backend tool-call history injection",
             "status": "passing",
+            "fixPrompt": "Add context-injection.e2e-spec.ts proving POST .../scribe/generate takes no request body capable of carrying prior history (ScribeController has no @Body() param) via an adversarial fabricated body with zero effect on output, and that cross-provider history sharing works for a shared patient while direct encounter access still 403s. Behavior already existed via Tier 0's ScribeService patientHistoryTool. Required first clarifying AGENTS.md's TENANT-ISOLATION wording (human sign-off 2026-08-17) to settle that it governs direct access to another provider's encounter record, not a patient's clinical history, which may cross providers treating the same patient.",
             "description": "For a returning patient, the AI retrieves and injects prior encounter history as context during generation via a backend tool/function call — not by stuffing prior notes into the frontend prompt.",
             "acceptance": [
                 "Prior history is fetched by a backend tool/function call during generation.",
@@ -583,6 +602,7 @@
             "tier": 1,
             "title": "Returning vs first-time behavior differs",
             "status": "passing",
+            "fixPrompt": "Add context-behavior.e2e-spec.ts proving a returning patient's generated Plan demonstrably references the prior visit's date and plan text while a first-time patient's does not, traced into libs/ai/mock-provider.ts to confirm the assertion is structurally tied to the tool-call result, not coincidental text overlap.",
             "description": "Generation demonstrably behaves differently for a returning patient versus a first-time patient.",
             "acceptance": [
                 "A returning patient's note reflects injected history; a first-time patient's does not.",
@@ -597,6 +617,7 @@
             "tier": 1,
             "title": "pgvector ICD-10 semantic search",
             "status": "passing",
+            "fixPrompt": "Add dedicated e2e coverage (icd10-search.e2e-spec.ts) for the already-working GET /icd10/search: relevance, limit-param, empty-query-rejection, and auth-required, against the real 234-code seeded set.",
             "description": "Semantic search over an embedded subset (200-300+) of ICD-10 codes using pgvector cosine similarity. No external ICD-10 API.",
             "acceptance": [
                 "200-300+ ICD-10 codes are embedded and stored in a pgvector column in RDS.",
@@ -615,6 +636,7 @@
             "tier": 1,
             "title": "ICD-10 search widget",
             "status": "passing",
+            "fixPrompt": "Add Icd10SearchWidget.tsx: standalone plain-English search, ranked results, per-result Add button (disabled/labeled 'Added' once a code is already on the note), injectable search prop defaulting to the real icd10Api.search client. Evaluator-required fix: add icd10.test.ts asserting the widget's real wiring to icd10Api.search (URL/query-encoding, default limit, error propagation) — existing tests only injected a mocked search prop. Along the way, fix Node 25's native localStorage shadowing jsdom's in vitest via a minimal in-memory Storage polyfill in apps/web/src/test/setup.ts.",
             "description": "A standalone ICD-10 search widget in the encounter workspace where a provider types a symptom/condition in plain English.",
             "acceptance": [
                 "The widget accepts plain-English input and shows ranked results.",
@@ -629,6 +651,7 @@
             "tier": 1,
             "title": "Append ICD-10 result to Assessment",
             "status": "passing",
+            "fixPrompt": "Wire Icd10SearchWidget's onAppendIcd10 to add {code, description} to the note's icd10Codes with client-side dedup, persisting on save through the existing unchanged note-save path so appended codes are indistinguishable from AI-generated ones once on the note.",
             "description": "The provider can click any search result to append it to the Assessment section of the open note.",
             "acceptance": [
                 "Clicking a result appends the code + description to the Assessment.",
