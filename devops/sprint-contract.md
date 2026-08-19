@@ -20,6 +20,93 @@ quietly get marked `passing` on a plan-only or mocked basis.
 
 ---
 
+## Active sprint — devops.terraform_ecr status reconciliation (2026-08-18)
+
+**Not new code.** This sprint is a status-reconciliation pass, not a build: `devops/feature-list.json`
+read `devops.terraform_ecr` as `status: blocked` (IAM `ecr:TagResource` AccessDenied, "no partial
+resources created") while `devops/session-handoff.md` flagged that status as disputed/stale —
+possibly superseded by later work that never got merged back. Goal: determine ground truth from
+real AWS + git history, not from either doc, and reconcile the docs to match reality. No Terraform,
+Dockerfile, or workflow changes expected or authorized this sprint — only
+`devops/feature-list.json` / `devops/progress.md` / `devops/session-handoff.md` /
+`devops/sprint-contract.md`.
+
+**Tier:** 0 (docs-only) · **Branch:** `docs/devops-terraform-ecr-reconcile`
+
+### Context
+
+Investigation before writing anything: `git log --all` showed PR #11 (`feat/devops-terraform-ecr`)
+merged to `main` at the "blocked" state (commit `8a35335`), but the remote branch
+`origin/feat/devops-terraform-ecr` was never deleted and carries one further commit, `be8a00f`
+("docs(devops): flip terraform_ecr to passing with real double-push proof"), never merged —
+it documents 2 more IAM rounds (manual.md Steps 9-10: `ecr:TagResource`, then
+`ecr:GetLifecyclePolicy`) and a completed real double-push immutability test. That commit is the
+source of the "disputed" status session-handoff flagged. Real AWS state needed to be checked
+independently rather than trusting that stranded commit's claims either.
+
+### Done conditions (this sprint's own, not copied from feature-list.json's acceptance — those are
+what's being re-verified, see below)
+
+- [x] All 4 of `devops.terraform_ecr`'s original acceptance criteria re-verified against live AWS
+      this session (not trusted from either doc).
+- [x] Determined how/where the resources were actually applied (CI vs local), with git evidence.
+- [x] `terraform plan` (plan-only, no apply) checked for drift between declared config and real
+      state.
+- [x] `feature-list.json` status set to match verified reality, with a rubric note giving today's
+      date, the real evidence, and an explanation of the discrepancy's origin.
+- [x] No `terraform apply` run by this sprint, under any circumstance.
+- [x] No files under `apps/*/src`, `libs/**`, or any Terraform/Dockerfile/workflow touched.
+
+### Verification plan (real commands, run for real, AWS_PROFILE=devops-agent)
+
+- [x] `aws ecr describe-repositories --repository-names scribe-api scribe-web` — confirm
+      `imageTagMutability=IMMUTABLE` + `scanOnPush=true` on both, independently of the calling
+      session's own report of the same.
+- [x] `aws ecr get-lifecycle-policy --repository-name scribe-api` / `scribe-web` — confirm the
+      untagged->7-days expiry rule.
+- [x] Live double-push test: pull a small public image, tag `scribe-api:smoke-test-tag`, push;
+      pull a *different* image, tag the same `smoke-test-tag`, push again — must be rejected.
+      (The tag already existed from a prior session's identical test — re-pushing the exact same
+      digest is a documented ECR no-op, so a genuinely different image was required to prove
+      rejection is still live today, not just historically.)
+- [x] `git log --all`, `git branch -a`, `gh pr list --state all` — determine merge/PR history for
+      any ECR/terraform_ecr-related work.
+- [x] `cd infra/terraform && terraform plan` (plan-only) — check for drift.
+- [x] Attempt `aws ecr batch-delete-image` on the leftover smoke-test tag (known-gap check, not
+      required for passing) — expect/confirm `AccessDeniedException` per documented
+      `ecr:BatchDeleteImage` gap, don't fight it if so.
+
+### Invariants that must still hold
+
+- [x] `terraform apply` never run by this sprint — plan-only.
+- [x] No static AWS credentials introduced (AWS_PROFILE=devops-agent, local CLI use only).
+- [x] No `latest` tag used anywhere (smoke test used `smoke-test-tag`, digest-pinned alpine
+      versions).
+- [x] No-touch zone respected — no `apps/*/src`, `libs/**`, Terraform, Dockerfile, or workflow
+      files touched; only devops docs.
+
+### Sprint outcome
+
+All 4 acceptance criteria confirmed live: both repos IMMUTABLE + scanOnPush; both lifecycle
+policies expire untagged images after 7 days; live double-push test rejected a genuinely
+different image on the existing tag (`alpine:3.18` -> `scribe-api:smoke-test-tag`, already
+holding `alpine:3.19`'s digest from a prior session — same-digest re-push succeeded as an
+expected ECR no-op, different-digest push was rejected with the immutability error). `terraform
+plan` shows zero drift — both `aws_ecr_repository` and `aws_ecr_lifecycle_policy` resources
+tracked cleanly in remote state. Provenance: applied via local `terraform apply`
+(AWS_PROFILE=devops-agent, PR #11, commit `8a35335`, merged to `main`) — not CI, because no
+`terraform apply` workflow exists anywhere in this repo yet; this matches the same documented
+Tier-0-bootstrap local-apply exception already used for `terraform_backend` and
+`terraform_oidc_github`. `ecr:BatchDeleteImage` still denied for `devops-agent`, as documented —
+left the leftover `smoke-test-tag` image alone. `devops/feature-list.json` ->
+`devops.terraform_ecr` `passing`, with a rubric note explaining the discrepancy's origin (a
+stranded, never-merged commit on `origin/feat/devops-terraform-ecr`) and citing this session's
+independent re-verification. `devops.cd_push_ecr_main` (Tier 2) is now unblocked with respect to
+this dependency — its other two dependencies (`ci_secret_scan`, `ci_image_scan_trivy`) were
+already `passing`.
+
+---
+
 ## Prior sprint outcome — devops.dockerfile_web (2026-08-18)
 
 All four Done conditions met with real evidence; all four literal `verify` commands run
