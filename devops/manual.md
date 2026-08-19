@@ -403,6 +403,134 @@ full verify sequence (`describe-repositories` for `IMMUTABLE`, the double-push s
 
 ---
 
+## Step 10 — Round 6: KMS access for RDS-managed master passwords + `ec2:ModifySubnetAttribute` (`devops.terraform_networking_rds`)
+
+Two new gaps surfaced provisioning the VPC/RDS for `devops.terraform_networking_rds`
+(2026-08-19), both real, both self-serve-avoided this session rather than blocking on a grant —
+documented here so they're not re-discovered from scratch, and so the stronger designs can be
+restored once granted.
+
+**Gap A — `ec2:ModifySubnetAttribute` (avoided, not granted).** Setting
+`map_public_ip_on_launch = true` on a subnet requires a follow-up `ModifySubnetAttribute` call
+distinct from `CreateSubnet` (which the existing `NetworkingCompute` statement's `ec2:Describe*`
++ explicit create/delete actions do NOT cover). Real error:
+
+```
+Error: modifying EC2 Subnet (subnet-xxxx) MapPublicIpOnLaunch: operation error EC2:
+ModifySubnetAttribute, ... UnauthorizedOperation: ... devops-agent is not authorized to perform:
+ec2:ModifySubnetAttribute ...
+```
+
+**Worked around, not granted:** removed `map_public_ip_on_launch` from `infra/terraform/main.tf`'s
+public subnets entirely — `devops.terraform_compute_envs` (next feature) can request a public IP
+per-EC2-instance at launch (`associate_public_ip_address = true` on `aws_instance`) instead,
+which needs no subnet-level attribute. If that feature's design ever needs the subnet-level
+default instead, add `ec2:ModifySubnetAttribute` to `NetworkingCompute`'s action list (resource
+scope can likely stay `"*"`, matching that statement's existing pattern, or be tightened to
+`arn:aws:ec2:*:*:subnet/*` if precision is preferred).
+
+**Gap B — KMS access for `aws_db_instance.manage_master_user_password` (avoided, not granted).**
+RDS's native "manage master password via Secrets Manager" feature needs the caller to have KMS
+permissions on the key backing the generated secret (defaults to the account's `aws/secretsmanager`
+key). `devops-agent` has ZERO KMS permissions — confirmed both of these `AccessDenied`, even
+though the default key itself already exists in this account:
+
+```
+$ aws kms describe-key --key-id alias/aws/secretsmanager
+AccessDeniedException: ... devops-agent is not authorized to perform: kms:DescribeKey ...
+(resolved real key ARN: arn:aws:kms:us-east-1:404063516240:key/7709dd66-6af7-4dd6-b4a4-44fb42480434)
+
+$ aws kms list-aliases
+AccessDeniedException: ... devops-agent is not authorized to perform: kms:ListAliases ...
+```
+
+And the actual `terraform apply` failure this caused:
+
+```
+Error: creating RDS DB Instance (scribe-dev): operation error RDS: CreateDBInstance, ...
+KMSKeyNotAccessibleFault: The specified KMS key [null] either doesn't exist, isn't enabled, or
+isn't accessible by the current user.
+```
+
+**Worked around, not granted:** switched `aws_db_instance.scribe` from
+`manage_master_user_password = true` to a Terraform-generated `random_password` resource
+(`password = random_password.master[each.key].result`), which needs zero KMS permissions — RDS
+accepts a caller-supplied plaintext password directly, no Secrets-Manager/KMS involvement at
+creation time. This is a real, disclosed security-posture downgrade vs. the original design (the
+password now lives in Terraform state — remote, S3-SSE-encrypted, versioned, never committed —
+rather than never touching Terraform at all). See `infra/terraform/main.tf`'s comment above
+`random_password.master` and `devops/sprint-contract.md`'s Active-sprint entry for the full
+disclosure.
+
+**Minimal fix to restore the stronger design:** grant `devops-agent` at minimum
+`kms:DescribeKey`, `kms:CreateGrant`, and `kms:GenerateDataKey` on
+`arn:aws:kms:us-east-1:404063516240:key/7709dd66-6af7-4dd6-b4a4-44fb42480434` (the account's
+existing default `aws/secretsmanager` key — no new key needs to be created). A new managed-policy
+statement, same `create-policy-version --set-as-default` process as Steps 6a/7/8/9, added to
+either `scribe-devops-bootstrap` or `scribe-devops-infra`:
+
+```json
+{"Sid": "SecretsManagerKmsForRds", "Effect": "Allow", "Action": ["kms:DescribeKey","kms:CreateGrant","kms:GenerateDataKey"], "Resource": "arn:aws:kms:us-east-1:404063516240:key/7709dd66-6af7-4dd6-b4a4-44fb42480434"}
+```
+
+Once granted: change `aws_db_instance.scribe` back to `manage_master_user_password = true` (drop
+`password`/`random_password.master`), `terraform apply` — RDS supports this transition cleanly
+(rotates the master password to a fresh RDS-managed one, invalidating the `random_password`
+value, which is expected and fine since nothing durable depends on the old one yet in a fresh
+demo environment).
+
+**Gap C — `ssm:SendCommand` on the AWS-owned `AWS-RunShellScript` document (NOT granted, feature
+left partial because of this).** Tried to prove pgvector + "connect from inside the VPC" (the
+feature's 4th acceptance criterion) via a throwaway, SSM-only EC2 probe instance (Amazon Linux
+2023, no SSH, no key pair, IAM role with only `AmazonSSMManagedInstanceCore` attached, attached to
+all 3 envs' compute SGs so one instance could reach all 3 RDS endpoints — created and torn down
+entirely via raw `aws` CLI calls, kept OUT of Terraform state deliberately since it's throwaway).
+The instance itself registered with SSM fine (`aws ssm describe-instance-information` showed it
+within ~30s), but `aws ssm send-command --document-name AWS-RunShellScript ...` failed:
+
+```
+An error occurred (AccessDeniedException) when calling the SendCommand operation: User:
+arn:aws:iam::404063516240:user/devops-agent is not authorized to perform: ssm:SendCommand on
+resource: arn:aws:ssm:us-east-1::document/AWS-RunShellScript because no identity-based policy
+allows the ssm:SendCommand action
+```
+
+Root cause: `scribe-devops-infra`'s existing `SsmDeploy` statement (Step 1) grants
+`ssm:SendCommand` on `Resource: "*"` but gates the WHOLE statement on
+`Condition: {"StringEquals": {"ssm:resourceTag/deploy": "true"}}`. `SendCommand` authorizes
+against BOTH resources it references — the target instance AND the document — and AWS-owned
+documents (`AWS-RunShellScript` lives in the `aws` account namespace) can never carry a
+`deploy` tag, so the condition can never be satisfied for the document half of the call, no
+matter how the target instance is tagged. This exact split is already handled correctly in
+`infra/terraform/main.tf`'s OWN `github_actions_deploy_permissions` policy (see
+`SsmSendCommandDeployTagged` vs. the separate, unconditioned `SsmSendCommandDocument`
+statement) — `scribe-devops-infra` (devops-agent's own IAM policy, a different, hand-maintained
+policy in this file) was never updated to match that pattern because devops-agent had never
+actually called `ssm:SendCommand` for real until this session.
+
+**Minimal fix:** add a second statement to `scribe-devops-infra`, unconditioned, scoped to just
+the one AWS-owned document ARN (mirrors `main.tf`'s working `SsmSendCommandDocument` statement
+exactly):
+
+```json
+{"Sid": "SsmSendCommandDocument", "Effect": "Allow", "Action": "ssm:SendCommand", "Resource": "arn:aws:ssm:us-east-1::document/AWS-RunShellScript"}
+```
+
+Same `create-policy-version --set-as-default` process as prior rounds, on `scribe-devops-infra`.
+
+**Not worked around — left genuinely partial.** Unlike Gaps A/B above, there was no reasonable
+self-serve alternative here that doesn't require either a new grant or self-authorizing IAM
+changes to `devops-agent` (explicitly against this workstream's rules). Terminated the throwaway
+EC2 instance and deleted the IAM role/instance profile created for the probe immediately after
+this failure — nothing left running or lingering. `devops.terraform_networking_rds`'s 4th
+acceptance criterion (pgvector enabled, proven from inside the VPC) is left honestly unverified
+this session; criteria 1-3 (PubliclyAccessible=false, SG-only-from-compute-SG, outside-VPC
+connection times out) are fully verified for real, for all 3 environments. Once this grant lands,
+re-run the same throwaway-EC2-probe mechanism (documented in
+`devops/sprint-contract.md`/`devops/progress.md`'s 2026-08-19 entries) to close this out.
+
+---
+
 ## Log
 
 - **2026-08-18** — First grant attempt (inline user policy) had no effect: `terraform apply`
