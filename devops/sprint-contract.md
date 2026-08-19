@@ -100,11 +100,65 @@ own PR" rule). Full detail: `devops/progress.md` 2026-08-18 entry.
 
 ## Active sprint
 
-**Feature(s):** _none — `devops.ci_secret_scan` above is the completed sprint for this
-session. Next `/devops` session: check whether `devops/manual.md` Step 9's IAM grant
-(`ecr:TagResource`) has landed for `devops.terraform_ecr`; if not, there's no unblocked Tier 0
-item and Tier 1 items beyond `ci_secret_scan` (`ci_build_images`, `ci_image_scan_trivy`)
-shouldn't be started without the same kind of explicit go-ahead this session had._
+**Feature(s):** `devops.ci_build_images` — explicitly dispatched this session (human go-ahead
+given directly for this specific feature, overriding the prior session's "don't start
+`ci_build_images` without explicit go-ahead" note). GitHub-side only, no AWS resources touched.
+
+**Goal (one sentence):** Add a GitHub Actions workflow that builds `scribe-api` and
+`scribe-web` via Docker Buildx (with GHA layer caching) on every PR, to validate the Dockerfiles
+compile, with no push step anywhere in the workflow.
+
+**Tier:** 1 · **Branch:** `feat/devops-ci-build-images`
+
+### Context
+
+`apps/api/Dockerfile` and `apps/web/Dockerfile` are both `passing` (`devops.dockerfile_api`,
+`devops.dockerfile_web`) and not to be modified. Both build from the repo root (`docker build -f
+apps/api/Dockerfile .`) per their own header comments — the workflow's `context` must be `.`
+(repo root), not the app subdirectory. Two separate jobs, `build-api` and `build-web`, both
+`pull_request`-triggered, using `docker/build-push-action@v6` with `push: false` and
+`cache-from: type=gha` / `cache-to: type=gha,mode=max`. No login/push/registry step at all —
+that's `devops.cd_push_ecr_main`, a separate later feature.
+
+### Explicitly OUT of scope this sprint
+
+- Any resource under `apps/api/src/**`, `apps/web/src/**`, `libs/**` — permanent no-touch zone.
+- Modifying `apps/api/Dockerfile` / `apps/web/Dockerfile` — passing features, build-only here.
+- `devops.ci_image_scan_trivy` / `devops.cd_push_ecr_main` — separate Tier 1/2 features, not
+  touched here.
+- Any push/login/registry-auth step — explicitly out of scope per the feature's own acceptance
+  criterion #3.
+- `devops.terraform_ecr` — still `blocked`, not mine to fix, not touched.
+
+### Done conditions (copied verbatim from `devops/feature-list.json` acceptance)
+
+- [ ] Both images build successfully on every PR.
+- [ ] Build uses layer caching (GHA cache backend) so PR builds aren't full-cold every time.
+- [ ] No push step runs on a PR — push only happens from `devops.cd_push_ecr_main`, on main.
+
+### Verification plan (real commands, run for real)
+
+- [ ] `actionlint .github/workflows/build-images.yml` — clean before pushing.
+- [ ] Open the real feature PR (its own `pull_request` trigger is the real verify run — no
+      throwaway PR needed, this feature only needs to prove a success case).
+- [ ] `gh pr checks` — `build-api` and `build-web` jobs both green.
+- [ ] `gh run view <run-id> --log | grep -qv 'docker push'` — confirm no push happened (also
+      confirmed by static read of the workflow file: no push/login step exists at all).
+
+### Invariants that must still hold
+
+- [ ] No static AWS credentials introduced anywhere (n/a — no AWS calls in this workflow).
+- [ ] No `latest` tag introduced anywhere, including local `docker build -t` tags.
+- [ ] No-touch zone respected (`git diff` confirms nothing under `apps/*/src` or `libs/**`, and
+      the two Dockerfiles themselves are untouched).
+- [ ] No push/registry-auth step added.
+
+### Definition of done
+
+- [ ] Every Done condition checked with real evidence.
+- [ ] Every verify command actually run, output recorded.
+- [ ] `devops/feature-list.json` → `passing` (or left `blocked`/`failing` with exact reason).
+- [ ] `devops/progress.md` + `devops/session-handoff.md` + this file updated in the same commit.
 
 ## Superseded draft — the original contract for `devops.ci_secret_scan`, filled in before
 coding (kept for the concrete approach; all boxes below are now checked, see the "Sprint
