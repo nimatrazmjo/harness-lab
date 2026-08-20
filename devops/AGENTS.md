@@ -216,6 +216,7 @@ overwrite. Add to this list per the root `AGENTS.md` §12 ratchet; don't specula
   instead if this happens; it fires immediately, including on the PR that introduces it.
 - **A `feature-list.json` status can be stale relative to a branch with a later, unmerged
   commit.** A status flip that only ever landed on a stranded branch tip (never merged to `main`)
-  left the tracked file reading `blocked` for days after the real work was actually done. When a
+  left the tracked file reading `blocked` for hours after the real work was actually done, until
+  an unrelated later session noticed the discrepancy and reconciled it independently. When a
   status looks surprising or a handoff doc disagrees with the tracked file, verify the real AWS
   state directly — don't trust either document over the other without checking.
