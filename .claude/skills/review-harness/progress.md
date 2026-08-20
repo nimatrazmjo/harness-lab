@@ -8,11 +8,17 @@ Newest entry on top.
 ## Current state
 
 Skill created 2026-08-19, as one of four domain review skills sharing
-`.claude/skills/review-shared/`. One entry retroactively logged (PR #23's real review cycle, the
-precedent this skill's procedure was written from). No live cycle has run through this skill's
-own dispatch flow yet.
+`.claude/skills/review-shared/`. Two entries logged, both `merged`: PR #23 (retroactive
+precedent) and PR #24 (this skill's own first live cycle, reviewing the PR that introduced it).
 
 ## Log
+
+### 2026-08-20 — PR #24's cycle closed out: merged, confirmed via GitHub API
+
+PR #24 merged by a human (`nimatrazmjo`, confirmed not a bot via `gh pr view --json mergedBy`) —
+`review-harness-2026-08-19-02-review-skills-pr24` flipped from `awaiting_merge_approval` to
+`merged` accordingly. First real exercise of `clean-state-checklist.md`'s merged-confirmation
+exception (the gate this same cycle's earlier fix made possible). `graph.md` regenerated.
 
 ### 2026-08-19 — skill created, PR #23's cycle logged retroactively
 
