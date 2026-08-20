@@ -2,8 +2,9 @@
 """generate-feature-graph.py -- regenerate a Mermaid dependency graph from a feature-list.json.
 
 Shared across every part of this repo's harness that tracks work in a feature-list.json shape
-(repo root, devops/, and .claude/skills/devops-request-grant/) so there is exactly ONE graph
-renderer to maintain, not three hand-rolled diagrams that drift out of sync with their data.
+(repo root, devops/, .claude/skills/devops-request-grant/, and the four
+.claude/skills/review-{api,web,infra,harness}/ skills) so there is exactly ONE graph renderer to
+maintain, not N hand-rolled diagrams that drift out of sync with their data.
 
 Two modes:
 
@@ -11,10 +12,11 @@ Two modes:
   array names prerequisite feature ids from the SAME file. Draws prerequisite -> dependent edges,
   grouped into one Mermaid subgraph per `tier` if the features carry a tier field.
 
-  blocks -- for a grant-request-style feature-list.json (see
-  .claude/skills/devops-request-grant/feature-list.json) where each entry's `blockedFeature`
-  field names a feature id in a DIFFERENT file (--external). Draws grant -> blocked-feature
-  edges; the external file is only used to resolve a nicer label, never modified.
+  blocks -- for an entry-points-elsewhere feature-list.json where each entry has a field naming
+  an id in a DIFFERENT file (--external): the grant-request skill's `blockedFeature`, or the
+  review skills' `reviewedTarget`. Field name is configurable via --target-field (default
+  `blockedFeature`). Draws entry -> external-target edges; the external file is only used to
+  resolve a nicer label, never modified.
 
 Output is written between marker comments so this script can safely coexist with hand-written
 content elsewhere in the same file (e.g. a static architecture diagram above the generated
@@ -23,7 +25,8 @@ yet, they're appended to the end of the file (or the file is created if it doesn
 
 Usage:
   scripts/generate-feature-graph.py <feature-list.json> --out <graph.md> [--relation dependsOn|blocks]
-                                     [--external <other-feature-list.json>] [--title "..."]
+                                     [--external <other-feature-list.json>]
+                                     [--target-field <field-name>] [--title "..."]
 
 Exit code is 0 on success, 1 if the input JSON doesn't parse or an id referenced by an edge
 doesn't exist (a broken edge is a bug worth surfacing, not silently dropping).
@@ -42,6 +45,8 @@ MARK_END = "<!-- GENERATED:feature-graph:END -->"
 STATUS_STYLE = {
     "passing":    ("#c8e6c9", "#2e7d32"),
     "verified":   ("#c8e6c9", "#2e7d32"),
+    "merged":     ("#c8e6c9", "#2e7d32"),
+    "no_issues_found": ("#c8e6c9", "#2e7d32"),
     "failing":    ("#eeeeee", "#757575"),
     "requested":  ("#eeeeee", "#757575"),
     "blocked":    ("#ffcdd2", "#c62828"),
@@ -49,6 +54,10 @@ STATUS_STYLE = {
     "in_progress":("#fff9c4", "#f9a825"),
     "dispatched": ("#fff9c4", "#f9a825"),
     "applied":    ("#fff9c4", "#f9a825"),
+    "reviewing":  ("#fff9c4", "#f9a825"),
+    "fixing":     ("#fff9c4", "#f9a825"),
+    "re_reviewing": ("#fff9c4", "#f9a825"),
+    "awaiting_merge_approval": ("#bbdefb", "#1565c0"),
 }
 DEFAULT_STYLE = ("#e0e0e0", "#616161")
 
@@ -101,7 +110,7 @@ def render_dependson(data: dict, title: str) -> str:
     return header + "\n" + "\n".join(lines)
 
 
-def render_blocks(data: dict, external: dict | None, title: str) -> str:
+def render_blocks(data: dict, external: dict | None, title: str, target_field: str) -> str:
     ext_titles = {f["id"]: f.get("title", f["id"]) for f in external["features"]} if external else {}
 
     lines = ["```mermaid", "flowchart LR"]
@@ -111,7 +120,7 @@ def render_blocks(data: dict, external: dict | None, title: str) -> str:
         label = f["id"].replace('"', "'")
         lines.append(f'    {nid}["{label}"]')
 
-        blocked = f.get("blockedFeature")
+        blocked = f.get(target_field)
         if blocked:
             ext_nid = node_id(f"ext_{blocked}")
             if blocked not in seen_external:
@@ -126,7 +135,7 @@ def render_blocks(data: dict, external: dict | None, title: str) -> str:
         lines.append(f"    style {node_id(f['id'])} fill:{fill},stroke:{stroke}")
     lines.append("```")
 
-    header = f"### {title}\n\n_{len(data['features'])} grant entries._\n"
+    header = f"### {title}\n\n_{len(data['features'])} entries._\n"
     return header + "\n" + "\n".join(lines)
 
 
@@ -151,6 +160,8 @@ def main() -> None:
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--relation", choices=["dependsOn", "blocks"], default="dependsOn")
     p.add_argument("--external", type=Path, default=None)
+    p.add_argument("--target-field", default="blockedFeature",
+                    help="blocks mode only: field name on each entry naming the external id it points at (default: blockedFeature)")
     p.add_argument("--title", default=None)
     args = p.parse_args()
 
@@ -161,7 +172,7 @@ def main() -> None:
         generated = render_dependson(data, title)
     else:
         external = load(args.external) if args.external else None
-        generated = render_blocks(data, external, title)
+        generated = render_blocks(data, external, title, args.target_field)
 
     splice(args.out, generated)
     print(f"[ok] wrote generated graph section to {args.out}")

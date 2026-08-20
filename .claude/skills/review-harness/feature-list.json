@@ -1,0 +1,60 @@
+{
+    "meta": {
+        "project": "review-harness skill — meta-layer review-cycle log",
+        "version": "1.0.0",
+        "purpose": "Structured, append-only record of every review cycle run via the review-harness skill. Schema and procedure shared across review-api/review-web/review-infra/review-harness — see .claude/skills/review-shared/PROCEDURE.md.",
+        "howToUse": [
+            "Append a new entry: status 'requested' if just logging pending work, or 'reviewing' if starting both passes immediately.",
+            "Move through fixing -> re_reviewing -> awaiting_merge_approval as the cycle progresses.",
+            "Never set 'merged' yourself unless a human has confirmed the merge actually happened — this skill never runs `gh pr merge`."
+        ],
+        "statusLegend": {
+            "requested": "Pending work identified/logged, cycle not yet actively started.",
+            "reviewing": "Both passes (code-review + harness-compliance) in progress.",
+            "fixing": "Real issues found, being fixed.",
+            "re_reviewing": "Fixes pushed, re-verifying against the real remote branch.",
+            "awaiting_merge_approval": "Cycle complete, PR ready, waiting on a human to merge.",
+            "merged": "Human confirmed the merge happened.",
+            "no_issues_found": "Both passes ran, genuinely nothing to report."
+        },
+        "invariantsRef": "review-shared/PROCEDURE.md + this domain's own internal-consistency checks (see SKILL.md)."
+    },
+    "features": [
+        {
+            "id": "review-harness-2026-08-19-01-devops-request-grant-pr23",
+            "status": "merged",
+            "title": "PR #23 — devops-request-grant skill + graph automation (retroactively logged)",
+            "description": "This review cycle happened informally, before this skill existed — logged retroactively as the real precedent this skill's procedure was written from, not a fabricated example. /code-review (high) found 5 issues (4 real bugs, 1 acknowledged tradeoff); fixed 4, pushed. A second /code-review (medium) pass re-flagged 2 already-fixed items — root-caused to the review fork checking stale local working-tree duplicates instead of the real pushed branch (a genuine harness-review lesson, now written into review-shared/PROCEDURE.md step 8 explicitly).",
+            "acceptance": [
+                "Both /code-review passes actually ran (they did).",
+                "Fixes verified against the real remote branch via GitHub API, not local state (done after the stale-state issue surfaced).",
+                "PR merged only after explicit human instruction each step of the way."
+            ],
+            "verify": [
+                "gh pr view 23 --json state -> MERGED",
+                "gh api repos/.../contents/.claude/skills/devops-request-grant/cleanup.sh?ref=... confirmed the -t 0 fix was genuinely live before merge"
+            ],
+            "dependsOn": [],
+            "reviewedTarget": "https://github.com/nimatrazmjo/harness-lab/pull/23",
+            "rubric": "PASS overall. Dimension 2 (real re-verification) is the standout lesson: the second review pass's false re-flags were only caught because fixes were independently re-checked against the real GitHub content rather than trusted at face value — exactly the discipline review-shared/evaluator-rubric.md's dimension 2 now codifies."
+        },
+        {
+            "id": "review-harness-2026-08-19-02-review-skills-pr24",
+            "status": "awaiting_merge_approval",
+            "title": "PR #24 — the four review skills' own introduction (dogfooded on itself)",
+            "description": "review-harness's scope explicitly covers .claude/skills/** — PR #24 is exactly that, so this is the skill reviewing the PR that created it. First review attempt accidentally targeted the wrong local branch (same class of mistake as PR #23's second pass, now doubly-confirmed as a real recurring risk, not a one-off); corrected by fetching the PR's actual diff directly via `gh pr diff 24` before dispatching a review against that file. Found 3 real issues: the seeded review-web entry's 'requested' status wasn't in the documented enum, clean-state-checklist.md's merge gate contradicted PROCEDURE.md's own documented merged-confirmation flow, and the loop no-op guard omitted awaiting_merge_approval as a terminal state.",
+            "acceptance": [
+                "/code-review-equivalent pass ran against the PR's actual fetched diff, not an ambiguous local checkout.",
+                "All 3 findings fixed and verified against the real remote branch via GitHub API before being reported as resolved.",
+                "PR not merged by this skill — stopped at awaiting_merge_approval per explicit human decision."
+            ],
+            "verify": [
+                "gh api repos/.../contents/.claude/skills/review-shared/PROCEDURE.md?ref=feat/domain-review-skills -- confirmed 'requested' and awaiting_merge_approval fixes genuinely live",
+                "gh pr view 24 --json state -> OPEN (not merged by this cycle)"
+            ],
+            "dependsOn": [],
+            "reviewedTarget": "https://github.com/nimatrazmjo/harness-lab/pull/24",
+            "rubric": "PASS. Dimension 2 (real re-verification against the actual target, not local state) was directly load-bearing here too: the first review attempt's misdirected result was only caught by checking git diff --stat main...HEAD against the diff's own stated content and noticing the mismatch, not by trusting the returned findings at face value."
+        }
+    ]
+}
