@@ -181,3 +181,41 @@ gh workflow run <name>.yml -f key=value          # manual dispatch workflows
 Same shape as the root repo's: acceptance criteria met, every `verify` command actually run and
 green, no invariant violated (root §2 + this file's non-negotiables), `status` flipped and
 committed on a branch/PR, `devops/progress.md` updated with what changed and the next item.
+
+## Common mistakes
+
+Concrete incidents from this workstream's real history, not hypotheticals — promoted here from
+`devops/session-handoff.md`/`devops/progress.md` so they survive past the next session-handoff
+overwrite. Add to this list per the root `AGENTS.md` §12 ratchet; don't speculate entries in.
+
+- **An IAM action authorizing against two resources can't be scoped by a tag condition if either
+  resource can never carry that tag.** `ssm:SendCommand` checks both the target instance AND the
+  document; AWS-owned documents (`AWS-RunShellScript`) can never carry a caller-set tag, so a
+  `deploy=true`-tag-gated statement can never authorize the document half no matter how the
+  instance is tagged. Needs a second, unconditioned statement scoped to just that document's ARN.
+- **A grant to create a resource does not cover reading it back, tagging it, or a separate
+  attribute-modify call.** Seen repeatedly, in distinct forms: post-create read-back
+  (`s3:GetBucketPolicy`, `dynamodb:DescribeContinuousBackups`), `TagResource` when Terraform
+  applies `default_tags` at creation, a follow-up attribute call distinct from create
+  (`ec2:ModifySubnetAttribute`), an entirely new AWS service never touched before (KMS), and a
+  list/describe action with no single taggable resource in the request at all
+  (`ssm:DescribeInstanceInformation`, can never satisfy a tag condition regardless of target
+  tagging). Check proactively for all of these on any new AWS resource/action type — don't wait
+  to hit each one individually.
+- **A denied post-create read-back can falsely taint a resource in Terraform state** (mark it for
+  destroy+recreate) even though the resource itself is fine. `lifecycle.prevent_destroy` blocking
+  the replace is doing its job, not a sign of a broken resource — clear the false taint with
+  `terraform untaint`, don't diagnose the resource as broken.
+- **Inline IAM user policies cap at 2,048 characters aggregate and fail silently past that
+  limit.** A combined ~8,500-character inline policy attempt produced identical `AccessDenied`
+  errors before and after "granting" it, with no error pointing at the actual cause. Use managed
+  policies instead — 6,144-char limit each, and the failure mode when you approach it is loud.
+- **A GitHub Actions `workflow_dispatch` trigger can get permanently stuck** if the workflow's ID
+  was first registered on a non-default branch — GitHub's dispatch-eligibility cache doesn't pick
+  up a later merge to `main`. Merging to `main` does not fix it. Use a `pull_request` trigger
+  instead if this happens; it fires immediately, including on the PR that introduces it.
+- **A `feature-list.json` status can be stale relative to a branch with a later, unmerged
+  commit.** A status flip that only ever landed on a stranded branch tip (never merged to `main`)
+  left the tracked file reading `blocked` for days after the real work was actually done. When a
+  status looks surprising or a handoff doc disagrees with the tracked file, verify the real AWS
+  state directly — don't trust either document over the other without checking.
