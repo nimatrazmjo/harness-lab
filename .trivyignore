@@ -12,9 +12,9 @@
 #     real, exploitable-in-principle transitive prod deps — multer via
 #     @nestjs/platform-express, lodash via @nestjs/config) up to their patched versions.
 #
-# What's left below is 13 CVE IDs (22 findings) entirely in Debian OS packages inherited from
+# What's left below is 14 CVE IDs (30 findings) entirely in Debian OS packages inherited from
 # the `node:22-slim` base image (confirmed already pinned to the newest available digest as of
-# 2026-08-18 — `docker pull node:22-slim` resolves to the exact same digest already in
+# 2026-08-22 — `docker pull node:22-slim` resolves to the exact same digest already in
 # apps/api/Dockerfile's ARG NODE_IMAGE, so there is no newer patched digest to bump to). None of
 # these packages (mount/util-linux family, gzip, perl-base, ncurses, libacl1, zlib1g) are ever
 # invoked by this image's runtime process — the container's only CMD is
@@ -27,6 +27,14 @@
 # calls `mount`/`blkid`/etc — inherited OS tooling, unused at runtime.
 # https://avd.aquasec.com/nvd/cve-2026-53615
 CVE-2026-53615
+
+# CVE-2026-53613 — util-linux: TOCTOU in the `mount` program via ancestor-directory swap. Same
+# source package/CVE family as CVE-2026-53615 above (bsdutils, libblkid1, libmount1,
+# libsmartcols1, libuuid1, mount, util-linux, util-linux-extra), same Debian status ("affected",
+# no patched package version yet). Requires an attacker able to race a local `mount` invocation;
+# this image's only CMD is `node apps/api/dist/main.js` — `mount` is never invoked.
+# https://avd.aquasec.com/nvd/cve-2026-53613
+CVE-2026-53613
 
 # CVE-2026-41992 — gzip. Debian status: "fix_deferred" (Debian security team has deliberately
 # deferred, not yet shipped). `gzip` binary is never invoked by this image's Node.js process.

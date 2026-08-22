@@ -47,7 +47,7 @@ echo ""
 echo "[3/3] Checking AWS auth (if aws CLI present)..."
 root_creds=0
 if command -v aws >/dev/null 2>&1; then
-  if identity_arn=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null); then
+  if identity_arn=$(aws sts get-caller-identity --profile "${AWS_PROFILE:-devops-agent}" --query Arn --output text 2>/dev/null); then
     echo "  [ok] AWS credentials resolve: $identity_arn"
     if [[ "$identity_arn" =~ ^arn:aws:iam::[0-9]+:root$ ]]; then
       root_creds=1

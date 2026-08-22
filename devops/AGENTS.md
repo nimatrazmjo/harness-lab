@@ -7,9 +7,9 @@
 >
 > - Claude Code reads `devops/CLAUDE.md`, which imports this file the same way the root does.
 > - **No-touch zone: this workstream never edits `apps/api/src/**`, `apps/web/src/**`, or
->   `libs/**`.** DevOps changes infrastructure, containers, and pipelines — not product code. If
->   a devops item seems to require an application code change (e.g. a Dockerfile needs a new
->   `/health` route that doesn't exist yet), stop and flag it in `devops/session-handoff.md`
+`libs/**`.** DevOps changes infrastructure, containers, and pipelines — not product code. If
+a devops item seems to require an application code change (e.g. a Dockerfile needs a new
+`/health`route that doesn't exist yet), stop and flag it in`devops/session-handoff.md`
 >   rather than crossing the boundary.
 
 **Files in this directory** (mirrors the repo-root harness, scoped to this workstream):
@@ -28,7 +28,7 @@ graph.md                 # feature dependency graph, auto-generated — see scri
 ## Session protocol
 
 1. **Resume & verify toolchain:** read `devops/session-handoff.md`, then run `bash
-   devops/init.sh` (checks docker/terraform/aws/trivy/gh are present, `devops/feature-list.json`
+devops/init.sh` (checks docker/terraform/aws/trivy/gh are present, `devops/feature-list.json`
    parses, and reports whether AWS credentials resolve). Fix the toolchain before proceeding if
    it fails. Then complete the rest of the _Start clean_ gate in
    `devops/clean-state-checklist.md`.
@@ -180,7 +180,11 @@ gh workflow run <name>.yml -f key=value          # manual dispatch workflows
 
 Same shape as the root repo's: acceptance criteria met, every `verify` command actually run and
 green, no invariant violated (root §2 + this file's non-negotiables), `status` flipped and
-committed on a branch/PR, `devops/progress.md` updated with what changed and the next item.
+committed on a branch/PR, `devops/progress.md` updated with what changed and the next item. If
+this feature is passing after a prior failure, set `fixPrompt` in `devops/feature-list.json` to
+the exact prompt that fixed it — this **replaces** any prior value, it never accumulates into a
+log. Each replacement should be cleaner and more structured than what it replaces, and scoped
+only to this feature: no unrelated fixes riding along in the same edit.
 
 ## Common mistakes
 
