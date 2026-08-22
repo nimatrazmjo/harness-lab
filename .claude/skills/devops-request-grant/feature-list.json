@@ -1,0 +1,48 @@
+{
+    "meta": {
+        "project": "devops-request-grant skill — AWS IAM grant request log",
+        "version": "1.0.0",
+        "purpose": "Structured, append-only record of every AWS IAM permission grant requested and executed via the devops-request-grant skill. Replaces devops/manual.md's prose log with a tracked list in the same shape as the repo's other feature-list.json files, paired with this skill's own init.sh/evaluator/cleanup harness. Lives inside the skill directory, not in devops/, per the skill's design.",
+        "howToUse": [
+            "Every time a grant is needed (SKILL.md step 2), append a new feature entry here BEFORE dispatching the grant-subagent, status 'requested'.",
+            "The grant-subagent flips it to 'applied' once create-policy-version --set-as-default succeeds, filling in appliedEvidence.",
+            "The calling session flips it to 'verified' ONLY after re-attempting the actual originally-blocked operation for real with AWS_PROFILE=devops-agent and confirming it now works — never on the subagent's report alone.",
+            "If the attempt fails or is declined, flip to 'denied' with the reason in rubric. Never delete a failed entry — it's part of the audit trail devops/manual.md used to be."
+        ],
+        "statusLegend": {
+            "requested": "Minimal statement drafted, not yet dispatched to a grant-subagent.",
+            "dispatched": "Grant-subagent running.",
+            "applied": "create-policy-version --set-as-default succeeded per the subagent's report, not yet independently re-verified.",
+            "verified": "The originally-blocked operation was re-attempted for real, by devops-agent, and now succeeds.",
+            "denied": "Assume-role or apply failed, or the human declined — see rubric for why."
+        },
+        "invariantsRef": "devops/AGENTS.md 'Requesting an AWS permission grant' section is the authoritative procedure this file supports. This skill's own non-negotiables: never root, never a self-grant, statements are minimal (no service:* wildcards, no Resource: \"*\" unless the action is inherently resource-less), every 'verified' status requires re-attempting the real blocked operation."
+    },
+    "features": [
+        {
+            "id": "grant-2026-08-19-01-ssm-senddocument",
+            "status": "denied",
+            "title": "ssm:SendCommand on the AWS-owned AWS-RunShellScript document",
+            "description": "devops.terraform_networking_rds's 4th acceptance criterion (pgvector enabled, proven reachable from inside the VPC) needs devops-agent to call ssm:SendCommand against the AWS-owned AWS-RunShellScript document. The existing SsmDeploy statement's ssm:resourceTag/deploy condition can never satisfy this — AWS-owned documents can't carry a caller-set tag, so the document half of the SendCommand authorization check always fails regardless of how the target instance is tagged.",
+            "acceptance": [
+                "Statement is scoped to exactly ssm:SendCommand on arn:aws:ssm:us-east-1::document/AWS-RunShellScript, unconditioned (mirrors infra/terraform/main.tf's own working SsmSendCommandDocument statement for the GitHub Actions deploy role).",
+                "Applied to scribe-devops-infra, set as the default version.",
+                "devops-agent can then successfully call ssm:SendCommand against that document for a deploy-tagged target instance."
+            ],
+            "verify": [
+                "aws iam get-policy-version --policy-arn arn:aws:iam::404063516240:policy/scribe-devops-infra --version-id <new-version> | grep SsmSendCommandDocument -- run with the iam-grantor-devops-agent ASSUMED-ROLE credentials still active from the apply step, in the same subagent session; neither nimat-admin (only sts:AssumeRole) nor devops-agent (structurally can't read its own policies) can call iam:GetPolicyVersion on their own",
+                "Re-run the throwaway SSM-probe mechanism (devops/progress.md's 2026-08-19 entries) with AWS_PROFILE=devops-agent and confirm ssm:SendCommand no longer returns AccessDeniedException"
+            ],
+            "dependsOn": [],
+            "policy": "scribe-devops-infra",
+            "statement": {
+                "Sid": "SsmSendCommandDocument",
+                "Effect": "Allow",
+                "Action": "ssm:SendCommand",
+                "Resource": "arn:aws:ssm:us-east-1::document/AWS-RunShellScript"
+            },
+            "blockedFeature": "devops.terraform_networking_rds",
+            "rubric": "Requested and re-attempted twice as of 2026-08-19 (once in the original PR #21 session, once in a dedicated re-verify subagent after this skill's grantor-role architecture was set up) — both times the identical AccessDeniedException came back verbatim, meaning the statement above has genuinely not landed on scribe-devops-infra yet (or landed without --set-as-default). Not yet run through this skill's own dispatch flow (SKILL.md step 3) — this entry is seeded from that prior history as the current real next candidate, not a fabricated example."
+        }
+    ]
+}

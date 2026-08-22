@@ -42,7 +42,13 @@ invoked.
       PR (never commit to `main`), flip `status` to `passing` only if `verify` actually
       succeeded, update `devops/feature-list.json` + prepend `devops/progress.md` + overwrite
       `devops/session-handoff.md` and `devops/sprint-contract.md` in the same change, and report
-      back a concise summary (what changed, verify output, what's next).
+      back a concise summary (what changed, verify output, what's next). If it hits
+      `AccessDenied` needing a permission `devops-agent` doesn't have, follow
+      `devops/AGENTS.md`'s "Requesting an AWS permission grant" procedure — draft the minimal
+      statement, then STOP and report back exactly what's needed (which policy, which
+      statement) rather than working around it or asking for root. Don't dispatch the
+      grant-subagent yourself from inside this subagent — report up to the calling session,
+      which handles the grant dispatch (see `/devops-request-grant`) before resuming your work.
 5. Relay the subagent's summary back to the user. Don't re-paste its raw tool output — that
    defeats the point of isolating it.
 

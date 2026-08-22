@@ -55,6 +55,8 @@ baseline check at both ends turns "inherited breakage" into "caught immediately,
 - [ ] `feature-list.json` statuses reflect reality (finished feature → `passing`)
 - [ ] `progress.md` has a new dated entry (what changed + the next feature)
 - [ ] `session-handoff.md` overwritten with the current snapshot and the single next action
+- [ ] If any feature's `status` or `dependsOn` changed, regenerate `graph.md`:
+      `python3 scripts/generate-feature-graph.py feature-list.json --out graph.md --title "AI Clinical Scribe — feature dependency graph"`
 
 ---
 

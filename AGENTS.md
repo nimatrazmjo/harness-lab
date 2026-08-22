@@ -103,12 +103,14 @@ progress.md        # rolling log: durable, append-only history (append at sessio
 session-handoff.md # warm baton-pass: overwritten each session, read first to resume
 clean-state-checklist.md # start-clean / leave-clean gates run at both ends of a session
 feature-list.json  # the prioritized, tier-ordered source of truth (work top-down)
+graph.md           # feature dependency graph, auto-generated — see scripts/generate-feature-graph.py
 devops/             # SEPARATE, on-demand workstream (containers/Terraform/CI-CD) — its own
                     # AGENTS.md + feature-list.json, invoked via the `/devops` skill so it never
                     # loads into a normal product-coding session. See §5.
 BUILD-CHECKLIST.md # phased day-by-day build sequence — the concrete order to work the tiers in
 sprint-contract.md # per-feature "done" agreed BEFORE coding (prevents scope drift)
 evaluator-rubric.md # adversarial scorecard applied AFTER coding (separate eval pass)
+scripts/            # generate-feature-graph.py (shared graph renderer) + secret/TLS check scripts
 ```
 
 **Context files (read at session start, keep current):** `session-handoff.md` (where we STOPPED —
@@ -264,3 +266,30 @@ isolation "works."
 Every agent mistake becomes a harness fix, not a one-off: forgot `provider_id` scoping → add a
 lint rule or test; edited a generated file → add it to §10; declared done with a failing test →
 tighten `pnpm verify`. Each incident tightens this file so the same mistake can't recur.
+
+## 13. Common mistakes
+
+Concrete incidents, not hypotheticals — each one actually happened and cost real time. Add to
+this list per §12's ratchet; don't speculate entries in.
+
+- **Verify against the real remote branch/PR, never local working-tree state.** A review fork
+  inheriting a stale local checkout gave false results twice in one session (once re-flagging
+  already-fixed issues, once reviewing an entirely different branch than the one intended).
+  Always `gh pr diff`/fetch-and-inspect the actual target before trusting a finding or reporting
+  a fix as confirmed.
+- **Check whether `main` has diverged before building on an existing branch.** Don't assume a
+  branch's copy of a shared file (`AGENTS.md`, `feature-list.json`) is current — it may be
+  missing merges that landed after the branch was created.
+- **Clean up leftover uncommitted duplicates after moving work to a separate branch/worktree.**
+  A stale duplicate left in the original working tree is exactly what causes the local-vs-remote
+  confusion above — a review/build tool that inherits your session's cwd will find it first.
+- **Verify a copied schema/pattern against the target's own docs, not just the source it came
+  from.** A status enum value copied from one skill's `feature-list.json` into another's didn't
+  match the target's own documented states — it worked by accident until someone checked.
+- **Spot-check an edited file's tail/boundaries after a batch or programmatic edit.** A truncated
+  or corrupted edit (a sentence cut off mid-word) went unnoticed across multiple sessions before
+  being caught.
+- **Never batch unrelated feature-status flips into one vague commit.** Each `feature-list.json`
+  status change should be individually attributable to what actually fixed it — a single
+  "flip 15 features to passing" commit with no per-feature detail makes later auditing (e.g.
+  reconstructing `fixPrompt`) impossible for anything in that batch.
